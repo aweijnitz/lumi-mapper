@@ -5,6 +5,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
 #include <iostream>
 #include <sstream>
@@ -19,11 +20,13 @@ RendererClient::RendererClient(RendererCommandHandler& handler,
                                std::string host,
                                int port,
                                std::string name,
+                               int connectRetries,
                                bool verbose)
     : handler_(handler),
       host_(std::move(host)),
       port_(port),
       name_(std::move(name)),
+      connectRetries_(connectRetries),
       verbose_(verbose) {}
 
 RendererClient::~RendererClient() { stop(); }
@@ -58,43 +61,76 @@ std::string RendererClient::lastError() const {
 
 void RendererClient::run() {
   try {
-  addrinfo hints{};
-  hints.ai_family = AF_UNSPEC;
-  hints.ai_socktype = SOCK_STREAM;
+  bool connected = false;
+  const int attempts = std::max(1, connectRetries_);
+  for (int attempt = 1; attempt <= attempts && running_; ++attempt) {
+    if (verbose_) {
+      std::cerr << "[renderer] connect attempt " << attempt << "/" << attempts << " to " << host_ << ":" << port_
+                << std::endl;
+    }
 
-  addrinfo* result = nullptr;
-  int rc = ::getaddrinfo(host_.c_str(), std::to_string(port_).c_str(), &hints, &result);
-  if (rc != 0 || result == nullptr) {
-    std::lock_guard<std::mutex> lock(errorMutex_);
-    lastError_ = "Failed to resolve server host: " + std::string(gai_strerror(rc));
+    addrinfo hints{};
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+
+    addrinfo* result = nullptr;
+    int rc = ::getaddrinfo(host_.c_str(), std::to_string(port_).c_str(), &hints, &result);
+    if (rc != 0 || result == nullptr) {
+      {
+        std::lock_guard<std::mutex> lock(errorMutex_);
+        lastError_ = "Failed to resolve server host: " + std::string(gai_strerror(rc));
+      }
+      if (verbose_) {
+        std::cerr << "[renderer] " << lastError_ << std::endl;
+      }
+    } else {
+      int sock = kInvalidSocket;
+      for (addrinfo* rp = result; rp != nullptr; rp = rp->ai_next) {
+        sock = ::socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        if (sock == kInvalidSocket) {
+          continue;
+        }
+        if (::connect(sock, rp->ai_addr, rp->ai_addrlen) == 0) {
+          break;
+        }
+        ::close(sock);
+        sock = kInvalidSocket;
+      }
+      ::freeaddrinfo(result);
+
+      if (sock != kInvalidSocket) {
+        {
+          std::lock_guard<std::mutex> lock(socketMutex_);
+          socketFd_ = sock;
+        }
+        if (verbose_) {
+          std::cerr << "[renderer] connected to server socket " << host_ << ":" << port_ << std::endl;
+        }
+        connected = true;
+        break;
+      }
+
+      {
+        std::lock_guard<std::mutex> lock(errorMutex_);
+        lastError_ = "Failed to connect to server at " + host_ + ":" + std::to_string(port_);
+      }
+      if (verbose_) {
+        std::cerr << "[renderer] " << lastError_ << std::endl;
+      }
+    }
+
+    if (attempt < attempts) {
+      std::this_thread::sleep_for(std::chrono::seconds(2));
+    }
+  }
+
+  if (!connected) {
+    if (verbose_) {
+      std::cerr << "[renderer] giving up after " << attempts << " connect attempt"
+                << (attempts == 1 ? "" : "s") << std::endl;
+    }
     running_ = false;
     return;
-  }
-
-  int sock = kInvalidSocket;
-  for (addrinfo* rp = result; rp != nullptr; rp = rp->ai_next) {
-    sock = ::socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-    if (sock == kInvalidSocket) {
-      continue;
-    }
-    if (::connect(sock, rp->ai_addr, rp->ai_addrlen) == 0) {
-      break;
-    }
-    ::close(sock);
-    sock = kInvalidSocket;
-  }
-  ::freeaddrinfo(result);
-
-  if (sock == kInvalidSocket) {
-    std::lock_guard<std::mutex> lock(errorMutex_);
-    lastError_ = "Failed to connect to server at " + host_ + ":" + std::to_string(port_);
-    running_ = false;
-    return;
-  }
-
-  {
-    std::lock_guard<std::mutex> lock(socketMutex_);
-    socketFd_ = sock;
   }
 
   projection::core::RendererMessage hello{};
@@ -107,11 +143,20 @@ void RendererClient::run() {
   std::string buffer;
   char chunk[256];
   while (running_) {
-    ssize_t received = ::recv(sock, chunk, sizeof(chunk), 0);
+    int socketFd = kInvalidSocket;
+    {
+      std::lock_guard<std::mutex> lock(socketMutex_);
+      socketFd = socketFd_;
+    }
+    if (socketFd == kInvalidSocket) {
+      break;
+    }
+
+    ssize_t received = ::recv(socketFd, chunk, sizeof(chunk), 0);
     if (received <= 0) {
       std::lock_guard<std::mutex> lock(errorMutex_);
       lastError_ = "Renderer connection closed during handshake";
-      ::close(sock);
+      ::close(socketFd);
       {
         std::lock_guard<std::mutex> socketLock(socketMutex_);
         socketFd_ = kInvalidSocket;
@@ -137,7 +182,7 @@ void RendererClient::run() {
     if (response.type == projection::core::RendererMessageType::Error && response.error) {
       std::lock_guard<std::mutex> lock(errorMutex_);
       lastError_ = response.error->message;
-      ::close(sock);
+      ::close(socketFd);
       {
         std::lock_guard<std::mutex> socketLock(socketMutex_);
         socketFd_ = kInvalidSocket;
@@ -148,7 +193,7 @@ void RendererClient::run() {
 
     std::lock_guard<std::mutex> lock(errorMutex_);
     lastError_ = "Unexpected handshake response from server";
-    ::close(sock);
+    ::close(socketFd);
     {
       std::lock_guard<std::mutex> socketLock(socketMutex_);
       socketFd_ = kInvalidSocket;

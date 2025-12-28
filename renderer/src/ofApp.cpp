@@ -11,12 +11,13 @@
 
 using projection::core::RendererMessageType;
 
-ofApp::ofApp(std::string host, int port, std::string name, bool verbose)
-    : client_(*this, std::move(host), port, std::move(name), verbose),
+ofApp::ofApp(std::string host, int port, std::string name, int connectRetries, bool verbose, bool enableAudio)
+    : client_(*this, std::move(host), port, std::move(name), connectRetries, verbose),
       host_(client_.host()),
       port_(port),
       name_(client_.name()),
-      verbose_(verbose) {}
+      verbose_(verbose),
+      audioRequested_(enableAudio) {}
 
 void ofApp::setup() {
   if (verbose_) {
@@ -29,20 +30,41 @@ void ofApp::setup() {
   midiIn_.addListener(this);
 #endif
 
-  const int inputChannels = 1;
-  const int outputChannels = 0;
-  const int sampleRate = 44100;
-  const int bufferSize = 512;
-  ofSoundStreamSettings soundSettings;
-  soundSettings.setInListener(this);
-  soundSettings.sampleRate = sampleRate;
-  soundSettings.numInputChannels = inputChannels;
-  soundSettings.numOutputChannels = outputChannels;
-  soundSettings.bufferSize = bufferSize;
-  soundSettings.numBuffers = 4;
-  soundStream_.setup(soundSettings);
+  if (audioRequested_) {
+    const int inputChannels = 1;
+    const int outputChannels = 0;
+    const int sampleRate = 44100;
+    const int bufferSize = 512;
+    bool audioInitialized = false;
+    try {
+      ofSoundStreamSettings soundSettings;
+      soundSettings.setInListener(this);
+      soundSettings.sampleRate = sampleRate;
+      soundSettings.numInputChannels = inputChannels;
+      soundSettings.numOutputChannels = outputChannels;
+      soundSettings.bufferSize = bufferSize;
+      soundSettings.numBuffers = 4;
+
+      audioInitialized = soundStream_.setup(soundSettings);
+      if (!audioInitialized && verbose_) {
+        std::cerr << "[renderer] audio input failed to initialize; continuing without audio" << std::endl;
+      }
+    } catch (const std::exception& ex) {
+      if (verbose_) {
+        std::cerr << "[renderer] audio input initialization error: " << ex.what()
+                  << "; continuing without audio" << std::endl;
+      }
+    }
+    audioEnabled_ = audioInitialized;
+  } else if (verbose_) {
+    std::cerr << "[renderer] audio disabled by configuration" << std::endl;
+  }
   if (verbose_) {
-    std::cerr << "[renderer] audio/midi initialized" << std::endl;
+    if (audioEnabled_) {
+      std::cerr << "[renderer] audio/midi initialized" << std::endl;
+    } else {
+      std::cerr << "[renderer] audio disabled; continuing without audio input" << std::endl;
+    }
   }
 }
 
@@ -227,7 +249,9 @@ void ofApp::newMidiMessage(ofxMidiMessage& msg) {
 #endif
 
 void ofApp::exit() {
-  soundStream_.stop();
+  if (audioEnabled_) {
+    soundStream_.stop();
+  }
 #if PROJECTION_HAS_OFX_MIDI
   midiIn_.closePort();
 #endif

@@ -189,6 +189,24 @@ Two long-running processes work together: the **server** (`lumi_server`) and the
     --name renderer-main
   ```
 
+Renderer connection notes:
+
+- The renderer retries server connections (default 10 attempts, 2 seconds apart).
+- Use `--connect-retries <N>` or `RENDERER_CONNECT_RETRIES` to override.
+- Use `--disable-audio` (or `RENDERER_DISABLE_AUDIO=1`) to skip audio input setup.
+- Use `--verbose` to log connection attempts and handshake status.
+
+Full example (all settings):
+
+```bash
+./build/renderer/renderer_default --verbose \
+  --server-host 127.0.0.1 \
+  --server-port 5050 \
+  --name renderer-main \
+  --disable-audio \
+  --connect-retries 10
+```
+
 Example renderer control calls:
 
 ```bash
@@ -229,6 +247,10 @@ Follow this minimal recipe to see the full end-to-end chain (server + renderer +
      --server-port 5050 \
      --name renderer-main
    ```
+   Optional flags:
+   - `--verbose` for connection logs.
+   - `--connect-retries 10` to retry before exiting.
+   - `--disable-audio` if CoreAudio input is unavailable.
 
 5. **Seed feeds and a scene (two ways):**
    - **Manual calls**

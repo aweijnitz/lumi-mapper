@@ -17,6 +17,7 @@ class RendererClient {
                  std::string host,
                  int port,
                  std::string name,
+                 int connectRetries = 10,
                  bool verbose = false);
   ~RendererClient();
 
@@ -32,6 +33,7 @@ class RendererClient {
   const std::string& host() const { return host_; }
   int port() const { return port_; }
   const std::string& name() const { return name_; }
+  int connectRetries() const { return connectRetries_; }
 
  private:
   void run();
@@ -48,6 +50,7 @@ class RendererClient {
   std::string name_;
   std::atomic<bool> running_{false};
   bool verbose_{false};
+  int connectRetries_{10};
   int socketFd_{-1};
   std::thread clientThread_{};
   mutable std::mutex errorMutex_{};

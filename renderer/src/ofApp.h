@@ -24,7 +24,12 @@ class ofApp : public ofBaseApp,
 #endif
               public projection::renderer::RendererCommandHandler {
  public:
-  explicit ofApp(std::string host, int port, std::string name, bool verbose = false);
+  explicit ofApp(std::string host,
+                 int port,
+                 std::string name,
+                 int connectRetries,
+                 bool verbose = false,
+                 bool enableAudio = true);
 
   void setup() override;
   void update() override;
@@ -76,4 +81,6 @@ class ofApp : public ofBaseApp,
   std::vector<float> audioBuffer_{};
   float audioScale_{1.0f};
   float smoothedEnergy_{0.0f};
+  bool audioEnabled_{false};
+  bool audioRequested_{true};
 };

@@ -14,6 +14,8 @@ struct Args {
   int port;
   std::string name;
   bool verbose;
+  bool enableAudio;
+  int connectRetries;
 };
 
 std::string defaultHost() {
@@ -45,7 +47,17 @@ std::string defaultName() {
 }
 
 Args parseArgs(int argc, char* argv[]) {
-  Args args{defaultHost(), defaultPort(), defaultName(), false};
+  const char* disableAudioEnv = std::getenv("RENDERER_DISABLE_AUDIO");
+  bool enableAudio = !(disableAudioEnv && *disableAudioEnv);
+  int connectRetries = 10;
+  if (const char* envRetries = std::getenv("RENDERER_CONNECT_RETRIES")) {
+    try {
+      connectRetries = std::stoi(envRetries);
+    } catch (...) {
+      std::cerr << "Invalid RENDERER_CONNECT_RETRIES value, defaulting to 10" << std::endl;
+    }
+  }
+  Args args{defaultHost(), defaultPort(), defaultName(), false, enableAudio, connectRetries};
   for (int i = 1; i < argc; ++i) {
     std::string arg(argv[i]);
     if (arg == "--server-host" && i + 1 < argc) {
@@ -66,6 +78,12 @@ Args parseArgs(int argc, char* argv[]) {
       args.port = std::stoi(arg.substr(7));
     } else if (arg == "--verbose") {
       args.verbose = true;
+    } else if (arg == "--disable-audio" || arg == "--no-audio") {
+      args.enableAudio = false;
+    } else if (arg == "--connect-retries" && i + 1 < argc) {
+      args.connectRetries = std::stoi(argv[++i]);
+    } else if (arg.rfind("--connect-retries=", 0) == 0) {
+      args.connectRetries = std::stoi(arg.substr(18));
     }
   }
   return args;
@@ -78,5 +96,5 @@ int main(int argc, char* argv[]) {
     std::cerr << "[renderer] verbose mode on" << std::endl;
   }
   ofSetupOpenGL(640, 480, OF_WINDOW);
-  return ofRunApp(new ofApp(args.host, args.port, args.name, args.verbose));
+  return ofRunApp(new ofApp(args.host, args.port, args.name, args.connectRetries, args.verbose, args.enableAudio));
 }
