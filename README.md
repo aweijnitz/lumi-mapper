@@ -1,4 +1,4 @@
-# projection-mapper
+# Lumi Mapper
 
 A modular, open-source **projection/video mapping engine** written primarily in **C++**, designed to run on **Raspberry Pi** and **macOS**.
 
