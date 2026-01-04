@@ -9,11 +9,12 @@ set -euo pipefail
 #   BUILD_TYPE=Debug ./scripts/build_all.sh
 # Environment:
 #   OPENFRAMEWORKS_DIR=/path/to/of_v0.12.1_osx_release
+#   MACOS_ARCH=x86_64|arm64  # build for a specific macOS architecture
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${BUILD_DIR:-"${ROOT_DIR}/build"}"
 BUILD_TYPE="${BUILD_TYPE:-RelWithDebInfo}"
-OPENFRAMEWORKS_DIR="${OPENFRAMEWORKS_DIR:-/Users/aweijnitz/openFrameworks/of_v0.12.1_osx_release}"
+OPENFRAMEWORKS_DIR="${OPENFRAMEWORKS_DIR:-}"
 
 CLEAN=0
 EXTRA_ARGS=()
@@ -51,7 +52,15 @@ else
   fi
 fi
 
+if [[ -z "${OPENFRAMEWORKS_DIR}" ]]; then
+  echo "OPENFRAMEWORKS_DIR must be set to an openFrameworks install (with libs/openFrameworks)." >&2
+  exit 1
+fi
+
 CONFIG_ARGS=(-S "${ROOT_DIR}" -B "${BUILD_DIR}" -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" -DOPENFRAMEWORKS_DIR="${OPENFRAMEWORKS_DIR}")
+if [[ -n "${MACOS_ARCH:-}" ]]; then
+  CONFIG_ARGS+=(-DCMAKE_OSX_ARCHITECTURES="${MACOS_ARCH}")
+fi
 echo "Configuring with openFrameworks at ${OPENFRAMEWORKS_DIR}"
 
 cmake "${CONFIG_ARGS[@]}"

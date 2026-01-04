@@ -174,6 +174,8 @@ Examples:
 - Catch2 is provided locally under `core/third_party/catch2` (lightweight harness plus `Catch2WithMain` target) for unit tests,
   and the test executable is registered with `add_test` for ctest integration.
 - Server builds must link against the system SQLite3 library and use the embedded DB file; no external DB service/container is expected.
+- Renderer builds require openFrameworks; macOS builds support separate x86_64 and arm64 targets via `CMAKE_OSX_ARCHITECTURES`.
+- Raspberry Pi builds are native-only and may need `OPENFRAMEWORKS_PLATFORM`/`OPENFRAMEWORKS_LIB_DIR` overrides for the OF lib path.
 
 ### Dockerization notes
 - Single container for the server that includes SQLite3 client library and runtime. No separate DB service is required.

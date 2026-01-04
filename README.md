@@ -88,7 +88,7 @@ graph TD
 
 - **SQLite3** headers and library on the host (e.g., `libsqlite3-dev` on Debian/Ubuntu or Homebrew `sqlite` on macOS).
 - No external database service is required; the server reads/writes a local file-backed DB at `./data/db/projection.db` by default.
-- **openFrameworks** (`of_v0.12.1_osx_release` tested) is required for the renderer; set `OPENFRAMEWORKS_DIR` to the install that contains `libs/openFrameworks/ofMain.h`. MIDI control requires the `ofxMidi` addon in that installation (renderer builds without it but MIDI input is disabled).
+- **openFrameworks** (`of_v0.12.1` tested) is required for the renderer; set `OPENFRAMEWORKS_DIR` to the install that contains `libs/openFrameworks/ofMain.h`. MIDI control requires the `ofxMidi` addon in that installation (renderer builds without it but MIDI input is disabled). For Raspberry Pi builds, install the matching openFrameworks Linux ARM release and point `OPENFRAMEWORKS_DIR` at it.
 
 __On MacOSX__ 
 
@@ -127,12 +127,44 @@ cmake --build build --target renderer_default
 
 - Binary output: `./build/renderer/renderer_default`
 
+### Multi-platform builds (macOS x86_64/arm64 + Raspberry Pi native)
+
+Use CMake presets for repeatable configurations:
+
+```bash
+# macOS x86_64
+export OPENFRAMEWORKS_DIR=/path/to/of_v0.12.1_osx_release
+cmake --preset macos-x86_64
+cmake --build --preset macos-x86_64 --target renderer_default
+
+# macOS arm64 (M1/M2)
+export OPENFRAMEWORKS_DIR=/path/to/of_v0.12.1_osx_release_arm64
+cmake --preset macos-arm64
+cmake --build --preset macos-arm64 --target renderer_default
+
+# Raspberry Pi native build (run on the Pi)
+export OPENFRAMEWORKS_DIR=/path/to/of_v0.12.1_linuxarmv7l_release
+export OPENFRAMEWORKS_PLATFORM=linuxarmv7l  # or linuxarm64/linuxarmv6l
+cmake --preset rpi-native
+cmake --build --preset rpi-native --target renderer_default
+```
+
+Notes:
+- macOS builds require a matching openFrameworks install for the target architecture.
+- For Raspberry Pi, `OPENFRAMEWORKS_PLATFORM` selects `libs/openFrameworksCompiled/lib/<platform>`; override with `OPENFRAMEWORKS_LIB_DIR` if your OF layout differs.
+- If additional link libs are needed on Linux, set `OPENFRAMEWORKS_EXTRA_LIBS` to a semicolon-separated list.
+
 ### Convenience build script
 
 ```bash
 ./scripts/build_all.sh           # builds lumi_server + renderer_default into ./build
+MACOS_ARCH=x86_64 ./scripts/build_all.sh
+MACOS_ARCH=arm64 ./scripts/build_all.sh
 BUILD_TYPE=Debug ./scripts/build_all.sh
 BUILD_DIR=/tmp/pmapper ./scripts/build_all.sh
+
+# Example
+OPENFRAMEWORKS_DIR=/Users/aweijnitz/openFrameworks/of_v0.12.1_osx_release ./scripts/build_all.sh
 ```
 
 - Defaults to `RelWithDebInfo` into `./build`. Additional arguments are passed through to `cmake --build`.
@@ -314,7 +346,7 @@ Follow this minimal recipe to see the full end-to-end chain (server + renderer +
 Run a minimal foreground app that opens a window and draws text (useful to confirm the renderer can show a window before testing video). Requires a local openFrameworks install; configure CMake with it:
 
 ```bash
-cmake -S . -B build -DOPENFRAMEWORKS_DIR=/Users/aweijnitz/openFrameworks/of_v0.12.1_osx_release
+cmake -S . -B build -DOPENFRAMEWORKS_DIR=/path/to/of_v0.12.1_osx_release
 cmake --build build --target renderer_hello
 ```
 
@@ -324,7 +356,7 @@ cmake --build build --target renderer_hello
 
 Omit `--quit-after` to leave the window open and close it manually. The app supports `--message "<text>"` and `--verbose`.
 
-Note: `./scripts/build_all.sh` configures the renderer with `OPENFRAMEWORKS_DIR` (set it if different from the default).
+Note: `./scripts/build_all.sh` requires `OPENFRAMEWORKS_DIR` to be set.
 
 7. **Observe on the projector/render window:**
    - Two separate videos should appear, each pinned to its own quad.
