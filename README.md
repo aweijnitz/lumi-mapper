@@ -60,26 +60,28 @@ Assets (images, video files, etc.) are stored on the filesystem (e.g. `./data/as
 
 The core library models a few key entities that the server, renderer, and clients share:
 
-- **Feed** – a source of pixels (video file, camera, generated content) with configuration metadata.
-- **Surface** – a quad/mesh on the projector mapped to a particular Feed with blend/opacity controls.
-- **Scene** – a collection of Surfaces configured together for playback.
-- **Cue** – references a Scene and optionally overrides surface parameters (opacity/brightness) when triggered.
+- **Project** – show-level container with cue ordering and settings (controllers, MIDI channels, globals).
+- **Feed** – a project-scoped source of pixels (video file, camera, generated content) with configuration metadata.
+- **Surface** – a quad/mesh within a Scene; references a Feed by id with blend/opacity/brightness controls.
+- **Scene** – a project-scoped collection of Surfaces configured together for playback.
+- **Cue** – a project-scoped reference to a Scene with optional per-surface opacity/brightness overrides.
 
 ```mermaid
 graph TD
-  Feed1[Feed]
-  Surface1[Surface]
-  Surface2[Surface]
-  Scene1[Scene]
-  Cue1[Cue]
+  Project[Project]
+  Feed[Feed]
+  Scene[Scene]
+  Surface[Surface]
+  Cue[Cue]
 
-  Surface1 --> Feed1
-  Surface2 --> Feed1
-  Scene1 --> Surface1
-  Scene1 --> Surface2
-  Cue1 --> Scene1
-  Cue1 --> Surface1
-  Cue1 --> Surface2
+  Project -->|scopes| Feed
+  Project -->|scopes| Scene
+  Project -->|scopes| Cue
+  Project -->|orders| Cue
+  Scene -->|contains| Surface
+  Surface -->|feedId| Feed
+  Cue -->|sceneId| Scene
+  Cue -->|overrides| Surface
 ```
 
 ---
@@ -230,6 +232,13 @@ Two long-running processes work together: the **server** (`lumi_server`) and the
     --renderer-port 5050
   ```
 
+- Server parameters:
+  - `--db <path>` (default `./data/db/projection.db`).
+  - `--port <port>` (default `8080`, HTTP API listener).
+  - `--renderer-port <port>` (default `5050`, renderer TCP listener).
+  - `--web-root <path>` to serve the Composer SPA (optional).
+  - `--verbose` to enable extra logging.
+
 - **Start the renderer** (in a separate terminal, connects to the server):
 
   ```bash
@@ -242,8 +251,12 @@ Two long-running processes work together: the **server** (`lumi_server`) and the
 Renderer connection notes:
 
 - The renderer retries server connections (default 10 attempts, 2 seconds apart).
+- Connection parameters:
+  - `--server-host <host>` (or `RENDERER_HOST`, default `127.0.0.1`).
+  - `--server-port <port>` or `--port <port>` (or `RENDERER_PORT`, default `5050`).
+  - `--name <name>` (or `RENDERER_NAME`, default `renderer-<pid>`).
 - Use `--connect-retries <N>` or `RENDERER_CONNECT_RETRIES` to override.
-- Use `--disable-audio` (or `RENDERER_DISABLE_AUDIO=1`) to skip audio input setup.
+- Use `--disable-audio` or `--no-audio` (or `RENDERER_DISABLE_AUDIO=1`) to skip audio input setup.
 - Use `--verbose` to log connection attempts and handshake status.
 
 Full example (all settings):
