@@ -67,22 +67,17 @@ The core library models a few key entities that the server, renderer, and client
 - **Cue** – a project-scoped reference to a Scene with optional per-surface opacity/brightness overrides.
 
 ```mermaid
-graph TD
-  Project[Project]
-  Feed[Feed]
-  Scene[Scene]
-  Surface[Surface]
-  Cue[Cue]
-
-  Project -->|scopes| Feed
-  Project -->|scopes| Scene
-  Project -->|scopes| Cue
-  Project -->|orders| Cue
-  Scene -->|contains| Surface
-  Surface -->|feedId| Feed
-  Cue -->|sceneId| Scene
-  Cue -->|overrides| Surface
+erDiagram
+  PROJECT ||..o{ FEED : "scopes"
+  PROJECT ||..o{ SCENE : "scopes"
+  PROJECT ||..o{ CUE : "scopes (cueOrder)"
+  SCENE ||--o{ SURFACE : "contains"
+  FEED ||..o{ SURFACE : "source_for"
+  SCENE ||..o{ CUE : "referenced_by"
+  CUE }o..o{ SURFACE : "overrides"
 ```
+
+Surfaces are embedded within their parent Scene (not stored as top-level entities), and cue ordering lives on Project as `cueOrder`.
 
 ---
 
