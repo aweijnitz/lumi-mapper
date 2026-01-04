@@ -322,15 +322,16 @@ void ofApp::updateStatusForHello(const projection::core::HelloMessage& hello, co
 void ofApp::updateStatusForLoadScene(const projection::core::LoadSceneMessage& loadScene,
                                      const std::string& commandId) {
   sceneId_ = loadScene.sceneId.value;
-  lastCommand_ = "LoadScene (#" + commandId + ")";
+  lastCommand_ = "LoadScene (#" + commandId + ") project " + loadScene.projectId.value;
 }
 
 void ofApp::updateStatusForSetFeed(const projection::core::SetFeedForSurfaceMessage& setFeed,
                                    const std::string& commandId) {
-  lastCommand_ = "SetFeedForSurface (#" + commandId + ") -> surface " + setFeed.surfaceId.value +
-                 " feed " + setFeed.feedId.value;
+  lastCommand_ = "SetFeedForSurface (#" + commandId + ") project " + setFeed.projectId.value + " -> surface " +
+                 setFeed.surfaceId.value + " feed " + setFeed.feedId.value;
 }
 
 void ofApp::updateStatusForPlayCue(const projection::core::PlayCueMessage& playCue, const std::string& commandId) {
-  lastCommand_ = "PlayCue (#" + commandId + ") -> cue " + playCue.cueId.value;
+  lastCommand_ =
+      "PlayCue (#" + commandId + ") project " + playCue.projectId.value + " -> cue " + playCue.cueId.value;
 }

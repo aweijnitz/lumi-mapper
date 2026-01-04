@@ -12,7 +12,8 @@ namespace projection::server::repo {
 
 SurfaceRepository::SurfaceRepository(db::SqliteConnection& connection) : connection_(connection) {}
 
-core::Surface SurfaceRepository::createSurface(const core::Surface& surface, const core::SceneId& sceneId) {
+core::Surface SurfaceRepository::createSurface(const core::Surface& surface, const core::ProjectId& projectId,
+                                               const core::SceneId& sceneId) {
     sqlite3* handle = connection_.getHandle();
     if (handle == nullptr) {
         throw std::runtime_error("SQLite connection is not open");
@@ -23,8 +24,8 @@ core::Surface SurfaceRepository::createSurface(const core::Surface& surface, con
     }
 
     const char* sql =
-        "INSERT INTO surfaces(id, scene_id, name, feed_id, z_order, opacity, brightness, blend_mode, vertices_json) "
-        "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?);";
+        "INSERT INTO surfaces(project_id, id, scene_id, name, feed_id, z_order, opacity, brightness, blend_mode, "
+        "vertices_json) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
 
     sqlite3_stmt* stmt = nullptr;
     int result = sqlite3_prepare_v2(handle, sql, -1, &stmt, nullptr);
@@ -37,6 +38,12 @@ core::Surface SurfaceRepository::createSurface(const core::Surface& surface, con
     const std::string blendMode = core::toString(surface.getBlendMode());
 
     int bindIndex = 1;
+    result = sqlite3_bind_text(stmt, bindIndex++, projectId.value.c_str(), -1, SQLITE_TRANSIENT);
+    if (result != SQLITE_OK) {
+        sqlite3_finalize(stmt);
+        throw std::runtime_error("Failed to bind surface project id: " + std::string(sqlite3_errmsg(handle)));
+    }
+
     result = sqlite3_bind_text(stmt, bindIndex++, surface.getId().value.c_str(), -1, SQLITE_TRANSIENT);
     if (result != SQLITE_OK) {
         sqlite3_finalize(stmt);
@@ -101,15 +108,16 @@ core::Surface SurfaceRepository::createSurface(const core::Surface& surface, con
     return surface;
 }
 
-std::vector<core::Surface> SurfaceRepository::listSurfacesForScene(const core::SceneId& sceneId) {
+std::vector<core::Surface> SurfaceRepository::listSurfacesForScene(const core::ProjectId& projectId,
+                                                                    const core::SceneId& sceneId) {
     sqlite3* handle = connection_.getHandle();
     if (handle == nullptr) {
         throw std::runtime_error("SQLite connection is not open");
     }
 
     const char* sql =
-        "SELECT id, name, vertices_json, feed_id, opacity, brightness, blend_mode, z_order FROM surfaces WHERE scene_id = ? "
-        "ORDER BY z_order, id;";
+        "SELECT id, name, vertices_json, feed_id, opacity, brightness, blend_mode, z_order "
+        "FROM surfaces WHERE project_id = ? AND scene_id = ? ORDER BY z_order, id;";
 
     sqlite3_stmt* stmt = nullptr;
     int result = sqlite3_prepare_v2(handle, sql, -1, &stmt, nullptr);
@@ -117,7 +125,13 @@ std::vector<core::Surface> SurfaceRepository::listSurfacesForScene(const core::S
         throw std::runtime_error("Failed to prepare surface select statement: " + std::string(sqlite3_errmsg(handle)));
     }
 
-    result = sqlite3_bind_text(stmt, 1, sceneId.value.c_str(), -1, SQLITE_TRANSIENT);
+    result = sqlite3_bind_text(stmt, 1, projectId.value.c_str(), -1, SQLITE_TRANSIENT);
+    if (result != SQLITE_OK) {
+        sqlite3_finalize(stmt);
+        throw std::runtime_error("Failed to bind surface project id: " + std::string(sqlite3_errmsg(handle)));
+    }
+
+    result = sqlite3_bind_text(stmt, 2, sceneId.value.c_str(), -1, SQLITE_TRANSIENT);
     if (result != SQLITE_OK) {
         sqlite3_finalize(stmt);
         throw std::runtime_error("Failed to bind scene id: " + std::string(sqlite3_errmsg(handle)));
@@ -163,20 +177,21 @@ std::vector<core::Surface> SurfaceRepository::listSurfacesForScene(const core::S
     return surfaces;
 }
 
-void SurfaceRepository::deleteSurfacesForScene(const core::SceneId& sceneId) {
+void SurfaceRepository::deleteSurfacesForScene(const core::ProjectId& projectId, const core::SceneId& sceneId) {
     sqlite3* handle = connection_.getHandle();
     if (handle == nullptr) {
         throw std::runtime_error("SQLite connection is not open");
     }
 
-    const char* sql = "DELETE FROM surfaces WHERE scene_id = ?;";
+    const char* sql = "DELETE FROM surfaces WHERE project_id = ? AND scene_id = ?;";
     sqlite3_stmt* stmt = nullptr;
     int result = sqlite3_prepare_v2(handle, sql, -1, &stmt, nullptr);
     if (result != SQLITE_OK) {
         throw std::runtime_error("Failed to prepare surface delete statement: " + std::string(sqlite3_errmsg(handle)));
     }
 
-    result = sqlite3_bind_text(stmt, 1, sceneId.value.c_str(), -1, SQLITE_TRANSIENT);
+    result = sqlite3_bind_text(stmt, 1, projectId.value.c_str(), -1, SQLITE_TRANSIENT);
+    result |= sqlite3_bind_text(stmt, 2, sceneId.value.c_str(), -1, SQLITE_TRANSIENT);
     if (result != SQLITE_OK) {
         sqlite3_finalize(stmt);
         throw std::runtime_error("Failed to bind scene id for surface delete: " + std::string(sqlite3_errmsg(handle)));

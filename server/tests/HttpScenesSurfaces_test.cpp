@@ -108,7 +108,7 @@ bool waitForServer(httplib::Client& client, HttpServer& server, const ServerRunn
             std::rethrow_exception(runner.error());
         }
         if (server.isRunning()) {
-            if (auto res = client.Get("/feeds")) {
+            if (auto res = client.Get("/api/projects")) {
                 (void)res;
                 return true;
             }
@@ -131,9 +131,13 @@ nlohmann::json surfaceJson(const std::string& id, const std::string& feedId, int
                           {"zOrder", zOrder}};
 }
 
-nlohmann::json feedJson(const std::string& id, const std::string& filePath) {
+nlohmann::json feedJson(const std::string& projectId, const std::string& id, const std::string& filePath) {
     nlohmann::json config{{"filePath", filePath}};
-    return nlohmann::json{{"id", id}, {"name", "Feed" + id}, {"type", "VideoFile"}, {"configJson", config.dump()}};
+    return nlohmann::json{{"projectId", projectId},
+                          {"id", id},
+                          {"name", "Feed" + id},
+                          {"type", "VideoFile"},
+                          {"configJson", config.dump()}};
 }
 
 }  // namespace
@@ -147,23 +151,36 @@ TEST_CASE("HTTP scenes endpoint persists and returns surfaces", "[http][scenes]"
     auto client = makeClient(port);
     REQUIRE(waitForServer(*client, ctx.httpServer, runner));
 
-    auto feed1 = client->Post("/feeds", feedJson("1", "/videos/a.mp4").dump(), "application/json");
+    const std::string projectId = "project-1";
+    REQUIRE(client->Post("/api/projects", nlohmann::json{{"id", projectId},
+                                                         {"name", "Project"},
+                                                         {"description", ""},
+                                                         {"cueOrder", nlohmann::json::array()},
+                                                         {"settings", nlohmann::json::object()}}
+                                                         .dump(),
+                         "application/json")
+                ->status == 201);
+
+    auto feed1 = client->Post(("/api/projects/" + projectId + "/feeds").c_str(),
+                              feedJson(projectId, "1", "/videos/a.mp4").dump(), "application/json");
     REQUIRE(feed1 != nullptr);
     REQUIRE(feed1->status == 201);
-    auto feed2 = client->Post("/feeds", feedJson("2", "/videos/b.mp4").dump(), "application/json");
+    auto feed2 = client->Post(("/api/projects/" + projectId + "/feeds").c_str(),
+                              feedJson(projectId, "2", "/videos/b.mp4").dump(), "application/json");
     REQUIRE(feed2 != nullptr);
     REQUIRE(feed2->status == 201);
 
-    nlohmann::json scene{{"id", "10"},
+    nlohmann::json scene{{"projectId", projectId},
+                         {"id", "10"},
                          {"name", "Scene1"},
                          {"description", "desc"},
                          {"surfaces", nlohmann::json::array({surfaceJson("s1", "1", 0), surfaceJson("s2", "2", 1)})}};
 
-    auto postScene = client->Post("/scenes", scene.dump(), "application/json");
+    auto postScene = client->Post(("/api/projects/" + projectId + "/scenes").c_str(), scene.dump(), "application/json");
     REQUIRE(postScene != nullptr);
     REQUIRE(postScene->status == 201);
 
-    auto getScene = client->Get("/scenes/10");
+    auto getScene = client->Get(("/api/projects/" + projectId + "/scenes/10").c_str());
     REQUIRE(getScene != nullptr);
     REQUIRE(getScene->status == 200);
 
@@ -185,16 +202,28 @@ TEST_CASE("HTTP scenes endpoint validates feed references", "[http][scenes][vali
     auto client = makeClient(port);
     REQUIRE(waitForServer(*client, ctx.httpServer, runner));
 
-    auto feed1 = client->Post("/feeds", feedJson("1", "/videos/a.mp4").dump(), "application/json");
+    const std::string projectId = "project-1";
+    REQUIRE(client->Post("/api/projects", nlohmann::json{{"id", projectId},
+                                                         {"name", "Project"},
+                                                         {"description", ""},
+                                                         {"cueOrder", nlohmann::json::array()},
+                                                         {"settings", nlohmann::json::object()}}
+                                                         .dump(),
+                         "application/json")
+                ->status == 201);
+
+    auto feed1 = client->Post(("/api/projects/" + projectId + "/feeds").c_str(),
+                              feedJson(projectId, "1", "/videos/a.mp4").dump(), "application/json");
     REQUIRE(feed1 != nullptr);
     REQUIRE(feed1->status == 201);
 
-    nlohmann::json scene{{"id", "11"},
+    nlohmann::json scene{{"projectId", projectId},
+                         {"id", "11"},
                          {"name", "Scene2"},
                          {"description", "desc"},
                          {"surfaces", nlohmann::json::array({surfaceJson("s1", "missing", 0)})}};
 
-    auto postScene = client->Post("/scenes", scene.dump(), "application/json");
+    auto postScene = client->Post(("/api/projects/" + projectId + "/scenes").c_str(), scene.dump(), "application/json");
     REQUIRE(postScene != nullptr);
     REQUIRE(postScene->status == 400);
 

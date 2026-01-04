@@ -27,34 +27,43 @@ TEST_CASE("parseServerConfig uses defaults", "[server][config]") {
     auto config = parseArgs(args);
 
     REQUIRE(config.databasePath == "./data/db/projection.db");
+    REQUIRE(config.webRoot.empty());
     REQUIRE(config.httpPort == 8080);
     REQUIRE(config.rendererPort == 5050);
 }
 
 TEST_CASE("parseServerConfig accepts overrides", "[server][config]") {
     std::vector<const char*> args{"lumi_server", "--db", "/tmp/projection.db", "--port", "5050",
-                                   "--renderer-port", "9090"};
+                                   "--renderer-port", "9090", "--web-root", "/opt/spa"};
 
     auto config = parseArgs(args);
 
     REQUIRE(config.databasePath == "/tmp/projection.db");
+    REQUIRE(config.webRoot == "/opt/spa");
     REQUIRE(config.httpPort == 5050);
     REQUIRE(config.rendererPort == 9090);
 }
 
 TEST_CASE("parseServerConfig accepts inline values", "[server][config]") {
     std::vector<const char*> args{"lumi_server", "--db=/opt/app.db", "--port=9090",
-                                   "--renderer-port=6060"};
+                                   "--renderer-port=6060", "--web-root=/srv/www"};
 
     auto config = parseArgs(args);
 
     REQUIRE(config.databasePath == "/opt/app.db");
+    REQUIRE(config.webRoot == "/srv/www");
     REQUIRE(config.httpPort == 9090);
     REQUIRE(config.rendererPort == 6060);
 }
 
 TEST_CASE("parseServerConfig rejects missing values", "[server][config]") {
     std::vector<const char*> args{"lumi_server", "--db"};
+
+    REQUIRE(throwsInvalid(args));
+}
+
+TEST_CASE("parseServerConfig rejects missing web root values", "[server][config]") {
+    std::vector<const char*> args{"lumi_server", "--web-root"};
 
     REQUIRE(throwsInvalid(args));
 }

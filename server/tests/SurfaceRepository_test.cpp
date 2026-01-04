@@ -2,6 +2,10 @@
 #include "db/SqliteConnection.h"
 #include "projection/core/Scene.h"
 #include "projection/core/Surface.h"
+#include "projection/core/Feed.h"
+#include "projection/core/Project.h"
+#include "repo/FeedRepository.h"
+#include "repo/ProjectRepository.h"
 #include "repo/SceneRepository.h"
 #include "repo/SurfaceRepository.h"
 
@@ -11,7 +15,12 @@
 #include <vector>
 
 using projection::core::BlendMode;
+using projection::core::Feed;
 using projection::core::FeedId;
+using projection::core::FeedType;
+using projection::core::Project;
+using projection::core::ProjectId;
+using projection::core::ProjectSettings;
 using projection::core::Scene;
 using projection::core::SceneId;
 using projection::core::Surface;
@@ -19,6 +28,8 @@ using projection::core::SurfaceId;
 using projection::core::Vec2;
 using projection::server::db::SchemaMigrations;
 using projection::server::db::SqliteConnection;
+using projection::server::repo::FeedRepository;
+using projection::server::repo::ProjectRepository;
 using projection::server::repo::SceneRepository;
 using projection::server::repo::SurfaceRepository;
 
@@ -36,20 +47,30 @@ TEST_CASE("SurfaceRepository can persist and list surfaces for a scene", "[repo]
     connection.open(dbPath.string());
     SchemaMigrations::applyMigrations(connection);
 
+    ProjectRepository projectRepo(connection);
+    FeedRepository feedRepo(connection);
     SceneRepository sceneRepo(connection);
     SurfaceRepository surfaceRepo(connection);
 
-    Scene scene(SceneId{"1"}, "Scene", "desc", {});
+    Project project(ProjectId{"proj-1"}, "Project", "", {}, ProjectSettings{});
+    project = projectRepo.createProject(project);
+
+    Feed feedA(project.getId(), FeedId{"f1"}, "Feed A", FeedType::VideoFile, "{}");
+    Feed feedB(project.getId(), FeedId{"f2"}, "Feed B", FeedType::VideoFile, "{}");
+    feedRepo.createFeed(feedA);
+    feedRepo.createFeed(feedB);
+
+    Scene scene(project.getId(), SceneId{"1"}, "Scene", "desc", {});
     sceneRepo.createScene(scene);
 
     std::vector<Vec2> quad{{0.f, 0.f}, {1.f, 0.f}, {1.f, 1.f}, {0.f, 1.f}};
     Surface surfaceA(SurfaceId{"sA"}, "A", quad, FeedId{"f1"}, 0.5f, 0.8f, BlendMode::Additive, 2);
     Surface surfaceB(SurfaceId{"sB"}, "B", quad, FeedId{"f2"}, 1.0f, 1.0f, BlendMode::Normal, 1);
 
-    surfaceRepo.createSurface(surfaceA, scene.getId());
-    surfaceRepo.createSurface(surfaceB, scene.getId());
+    surfaceRepo.createSurface(surfaceA, project.getId(), scene.getId());
+    surfaceRepo.createSurface(surfaceB, project.getId(), scene.getId());
 
-    auto surfaces = surfaceRepo.listSurfacesForScene(scene.getId());
+    auto surfaces = surfaceRepo.listSurfacesForScene(project.getId(), scene.getId());
     REQUIRE(surfaces.size() == 2);
 
     auto first = surfaces[0];

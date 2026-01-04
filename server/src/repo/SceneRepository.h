@@ -16,13 +16,13 @@ public:
 
     core::Scene createScene(const core::Scene& scene);
 
-    std::vector<core::Scene> listScenes();
+    std::vector<core::Scene> listScenes(const core::ProjectId& projectId);
 
-    std::optional<core::Scene> findSceneById(const core::SceneId& sceneId);
+    std::optional<core::Scene> findSceneById(const core::ProjectId& projectId, const core::SceneId& sceneId);
     core::Scene updateScene(const core::Scene& scene);
-    void deleteScene(const core::SceneId& sceneId);
+    void deleteScene(const core::ProjectId& projectId, const core::SceneId& sceneId);
 
-    bool sceneExists(const core::SceneId& sceneId);
+    bool sceneExists(const core::ProjectId& projectId, const core::SceneId& sceneId);
 
 private:
     db::SqliteConnection& connection_;

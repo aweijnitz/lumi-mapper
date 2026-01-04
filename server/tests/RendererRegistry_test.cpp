@@ -194,7 +194,8 @@ TEST_CASE("RendererRegistry accepts renderer and broadcasts messages", "[rendere
     RendererMessage message{};
     message.type = RendererMessageType::LoadScene;
     message.commandId = "cmd-load";
-    message.loadScene = projection::core::LoadSceneMessage{projection::core::SceneId{"scene-1"}};
+    message.loadScene =
+        projection::core::LoadSceneMessage{projection::core::ProjectId{"project-1"}, projection::core::SceneId{"scene-1"}};
 
     REQUIRE(registry.broadcastMessage(message) == 1);
     REQUIRE(renderer.waitForMessages(1));

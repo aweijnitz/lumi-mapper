@@ -146,6 +146,8 @@ add_executable(renderer_default
     ${RENDERER_SRC_DIR}/main.cpp
     ${RENDERER_SRC_DIR}/ofApp.cpp
     ${RENDERER_SRC_DIR}/ofApp.h
+    ${RENDERER_SRC_DIR}/util/ShutdownUtils.cpp
+    ${RENDERER_SRC_DIR}/util/ShutdownUtils.h
     ${RENDERER_SRC_DIR}/util/InteractionUtils.cpp
     ${RENDERER_SRC_DIR}/util/InteractionUtils.h
 )
@@ -169,6 +171,8 @@ target_link_options(renderer_default PRIVATE ${OPENFRAMEWORKS_FRAMEWORK_OPTIONS}
 
 add_executable(renderer_hello
     ${RENDERER_SRC_DIR}/hello_main.cpp
+    ${RENDERER_SRC_DIR}/util/ShutdownUtils.cpp
+    ${RENDERER_SRC_DIR}/util/ShutdownUtils.h
 )
 
 target_include_directories(renderer_hello
@@ -183,10 +187,13 @@ target_link_options(renderer_hello PRIVATE ${OPENFRAMEWORKS_FRAMEWORK_OPTIONS})
 add_executable(renderer_default_tests
     ${RENDERER_SRC_DIR}/util/InteractionUtils.cpp
     ${RENDERER_SRC_DIR}/util/InteractionUtils.h
+    ${RENDERER_SRC_DIR}/util/ShutdownUtils.cpp
+    ${RENDERER_SRC_DIR}/util/ShutdownUtils.h
     tests/RendererClient_test.cpp
     tests/RendererServer_test.cpp
     tests/RenderState_test.cpp
     tests/InteractionUtils_test.cpp
+    tests/ShutdownUtils_test.cpp
 )
 
 target_link_libraries(renderer_default_tests

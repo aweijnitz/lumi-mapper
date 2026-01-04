@@ -2,13 +2,43 @@
 
 #include <ofMain.h>
 
-#include <iostream>
+#include <atomic>
+#include <csignal>
 #include <cstdlib>
+#include <iostream>
 #include <string>
 #include <vector>
 #include <unistd.h>
 
+#include "util/ShutdownUtils.h"
+
 namespace {
+std::atomic<bool> shutdownRequested{false};
+
+void safeSignalHandler(int signum) {
+  if (shutdownRequested.exchange(true)) {
+    return;
+  }
+  std::signal(SIGTERM, SIG_DFL);
+  std::signal(SIGQUIT, SIG_DFL);
+  std::signal(SIGINT, SIG_DFL);
+  std::signal(SIGHUP, SIG_DFL);
+  std::signal(SIGABRT, SIG_DFL);
+
+  std::cerr << "[renderer] signal " << signum << " received; requesting shutdown" << std::endl;
+  if (!projection::renderer::requestWindowClose(ofGetWindowPtr(), std::cerr, "renderer")) {
+    std::_Exit(signum);
+  }
+}
+
+void installSignalHandlers() {
+  std::signal(SIGTERM, &safeSignalHandler);
+  std::signal(SIGQUIT, &safeSignalHandler);
+  std::signal(SIGINT, &safeSignalHandler);
+  std::signal(SIGHUP, &safeSignalHandler);
+  std::signal(SIGABRT, &safeSignalHandler);
+}
+
 struct Args {
   std::string host;
   int port;
@@ -96,5 +126,10 @@ int main(int argc, char* argv[]) {
     std::cerr << "[renderer] verbose mode on" << std::endl;
   }
   ofSetupOpenGL(640, 480, OF_WINDOW);
+  if (!projection::renderer::isWindowAvailable(ofGetWindowPtr(), std::cerr, "renderer")) {
+    std::cerr << "[renderer] OpenGL initialization failed; window was not created" << std::endl;
+    return 1;
+  }
+  installSignalHandlers();
   return ofRunApp(new ofApp(args.host, args.port, args.name, args.connectRetries, args.verbose, args.enableAudio));
 }

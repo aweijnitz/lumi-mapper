@@ -142,28 +142,46 @@ BUILD_DIR=/tmp/pmapper ./scripts/build_all.sh
 
 - The server uses an embedded **SQLite3** database file and will create the DB on first run if it does not already exist.
 - Configuration is provided via command-line flags: `--db <path>` for the SQLite file location and `--port <port>` for the HTTP listener.
+- If you pull schema changes, delete the SQLite file to reset state (no automatic migrations yet).
 
 ```bash
 # Start the server with explicit configuration
 ./build/server/lumi_server --db ./data/db/projection.db --port 8080
 ```
 
+### Serve the Composer SPA from the server (optional)
+
+Build the SPA and point the server at the build output to keep the UI and API on the same origin:
+
+```bash
+# Build the Composer SPA
+cd clients/composer
+npm run build
+
+# Serve API + SPA together
+./build/server/lumi_server --db ./data/db/projection.db --port 8080 --web-root ./clients/composer/dist
+```
+
 Example API calls (HTTP+JSON):
 
 ```bash
-curl http://localhost:8080/renderer/ping
+curl http://localhost:8080/api/renderer/ping
 
-curl -X POST http://localhost:8080/feeds \
+curl -X POST http://localhost:8080/api/projects \
   -H "Content-Type: application/json" \
-  -d '{"id":"feed-1","name":"Camera","type":"Camera","configJson":"{}"}'
+  -d '{"id":"project-1","name":"Demo Project","description":"","cueOrder":[],"settings":{"controllers":{},"midiChannels":[],"globalConfig":{}}}'
 
-curl http://localhost:8080/feeds
-
-curl -X POST http://localhost:8080/scenes \
+curl -X POST http://localhost:8080/api/projects/project-1/feeds \
   -H "Content-Type: application/json" \
-  -d '{"id":"scene-1","name":"Main","description":"Example scene","surfaces":[]}'
+  -d '{"projectId":"project-1","id":"feed-1","name":"Camera","type":"Camera","configJson":"{}"}'
 
-curl http://localhost:8080/scenes
+curl http://localhost:8080/api/projects/project-1/feeds
+
+curl -X POST http://localhost:8080/api/projects/project-1/scenes \
+  -H "Content-Type: application/json" \
+  -d '{"projectId":"project-1","id":"scene-1","name":"Main","description":"Example scene","surfaces":[]}'
+
+curl http://localhost:8080/api/projects/project-1/scenes
 ```
 
 ### Renderer integration
@@ -211,10 +229,10 @@ Example renderer control calls:
 
 ```bash
 # List connected renderers
-curl -X POST http://localhost:8080/renderer/ping
+curl -X POST http://localhost:8080/api/renderer/ping
 
 # Load a scene that already exists in the server DB
-curl -X POST http://localhost:8080/renderer/loadScene \
+curl -X POST http://localhost:8080/api/projects/project-1/renderer/loadScene \
   -H "Content-Type: application/json" \
   -d '{"sceneId":"1"}'
 ```
@@ -255,27 +273,36 @@ Follow this minimal recipe to see the full end-to-end chain (server + renderer +
 5. **Seed feeds and a scene (two ways):**
    - **Manual calls**
      ```bash
+     # Create a project to scope all feeds/scenes/cues
+     curl -X POST http://localhost:8080/api/projects -H "Content-Type: application/json" \
+       -d '{"id":"project-1","name":"Demo Project","description":"","cueOrder":[],"settings":{"controllers":{},"midiChannels":[],"globalConfig":{}}}'
+
      # Create two VideoFile feeds pointing at the prepared assets
-     curl -X POST http://localhost:8080/feeds -H "Content-Type: application/json" \
-       -d '{"id":"1","name":"Clip A","type":"VideoFile","configJson":{"filePath":"data/assets/clipA.mp4"}}'
-     curl -X POST http://localhost:8080/feeds -H "Content-Type: application/json" \
-       -d '{"id":"2","name":"Clip B","type":"VideoFile","configJson":{"filePath":"data/assets/clipB.mp4"}}'
+     curl -X POST http://localhost:8080/api/projects/project-1/feeds -H "Content-Type: application/json" \
+       -d '{"projectId":"project-1","id":"1","name":"Clip A","type":"VideoFile","configJson":{"filePath":"data/assets/clipA.mp4"}}'
+     curl -X POST http://localhost:8080/api/projects/project-1/feeds -H "Content-Type: application/json" \
+       -d '{"projectId":"project-1","id":"2","name":"Clip B","type":"VideoFile","configJson":{"filePath":"data/assets/clipB.mp4"}}'
 
      # Create a scene with two surfaces that reference the feeds and include quad vertices
-     curl -X POST http://localhost:8080/scenes -H "Content-Type: application/json" \
-       -d '{"id":"1","name":"Two Video Demo","description":"M4 walkthrough","surfaces":[{"id":"surface-a","name":"Left Quad","vertices":[{"x":-0.8,"y":-0.6},{"x":-0.1,"y":-0.5},{"x":-0.1,"y":0.2},{"x":-0.8,"y":0.1}],"feedId":"1","opacity":1.0,"brightness":1.0,"blendMode":"Normal","zOrder":0},{"id":"surface-b","name":"Right Quad","vertices":[{"x":0.1,"y":-0.3},{"x":0.8,"y":-0.2},{"x":0.7,"y":0.5},{"x":0.0,"y":0.4}],"feedId":"2","opacity":1.0,"brightness":1.0,"blendMode":"Normal","zOrder":1}]}'
+     curl -X POST http://localhost:8080/api/projects/project-1/scenes -H "Content-Type: application/json" \
+       -d '{"projectId":"project-1","id":"1","name":"Two Video Demo","description":"M4 walkthrough","surfaces":[{"id":"surface-a","name":"Left Quad","vertices":[{"x":-0.8,"y":-0.6},{"x":-0.1,"y":-0.5},{"x":-0.1,"y":0.2},{"x":-0.8,"y":0.1}],"feedId":"1","opacity":1.0,"brightness":1.0,"blendMode":"Normal","zOrder":0},{"id":"surface-b","name":"Right Quad","vertices":[{"x":0.1,"y":-0.3},{"x":0.8,"y":-0.2},{"x":0.7,"y":0.5},{"x":0.0,"y":0.4}],"feedId":"2","opacity":1.0,"brightness":1.0,"blendMode":"Normal","zOrder":1}]}'
 
      # Send the full Scene + Feeds payload to the renderer
-     curl -X POST http://localhost:8080/renderer/loadScene -H "Content-Type: application/json" -d '{"sceneId":"1"}'
+     curl -X POST http://localhost:8080/api/projects/project-1/renderer/loadScene -H "Content-Type: application/json" -d '{"sceneId":"1"}'
      ```
      (`configJson` accepts either a JSON string or an inline JSON object; it is stored as a serialized string internally.)
 
    - **Demo helper endpoint** (auto-creates feeds/surfaces/scene and sends LoadSceneDefinition):
      ```bash
-     curl -X POST http://localhost:8080/demo/two-video-test -d ''
+     curl -X POST http://localhost:8080/api/demo/two-video-test -d ''
      ```
-     The JSON response includes the created feed and scene IDs.
+     The JSON response includes the created project, feed, and scene IDs.
      Note: cpp-httplib requires a `Content-Length` header for POST; `-d ''` adds an explicit empty body.
+
+     To clear demo projects:
+     ```bash
+     curl -X POST http://localhost:8080/api/demo/clear-projects -d ''
+     ```
 
 6. **Verbose logging (optional)**
    - Server: add `--verbose` to the args (e.g., `SERVER_ARGS="--verbose" ./scripts/server.sh start`).

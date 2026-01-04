@@ -12,6 +12,7 @@
 #include <vector>
 
 using projection::core::Cue;
+using projection::core::ProjectId;
 using projection::core::Project;
 using projection::core::ProjectSettings;
 using projection::core::Scene;
@@ -39,19 +40,23 @@ TEST_CASE("ProjectRepository persists and retrieves ordered cues", "[repo][proje
     CueRepository cueRepo(connection);
     ProjectRepository projectRepo(connection);
 
-    Scene scene{makeSceneId("1"), "Scene", "desc", {}};
-    sceneRepo.createScene(scene);
-
-    Cue cueA{makeCueId("cue-A"), "A", scene.getId()};
-    Cue cueB{makeCueId("cue-B"), "B", scene.getId()};
-    cueRepo.createCue(cueA);
-    cueRepo.createCue(cueB);
-
     ProjectSettings settings;
     settings.midiChannels = {1};
     settings.controllers["fader1"] = "master";
-    Project project{makeProjectId("proj-1"), "Show", "Demo", {cueA.getId(), cueB.getId()}, settings};
+    Project project{makeProjectId("proj-1"), "Show", "Demo", {}, settings};
     projectRepo.createProject(project);
+
+    Scene scene{project.getId(), makeSceneId("1"), "Scene", "desc", {}};
+    sceneRepo.createScene(scene);
+
+    Cue cueA{project.getId(), makeCueId("cue-A"), "A", scene.getId()};
+    Cue cueB{project.getId(), makeCueId("cue-B"), "B", scene.getId()};
+    cueRepo.createCue(cueA);
+    cueRepo.createCue(cueB);
+
+    Project updated = project;
+    updated.getCueOrder() = {cueA.getId(), cueB.getId()};
+    projectRepo.updateProject(updated);
 
     auto projects = projectRepo.listProjects();
     REQUIRE(projects.size() == 1);
@@ -59,7 +64,6 @@ TEST_CASE("ProjectRepository persists and retrieves ordered cues", "[repo][proje
     REQUIRE(projects.front().getCueOrder()[0] == cueA.getId());
     REQUIRE(projects.front().getSettings().controllers.at("fader1") == "master");
 
-    Project updated = project;
     updated.setDescription("Updated");
     updated.getCueOrder() = {cueB.getId()};
     auto updatedSettings = updated.getSettings();

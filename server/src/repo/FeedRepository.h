@@ -15,10 +15,10 @@ public:
     explicit FeedRepository(db::SqliteConnection& connection);
 
     core::Feed createFeed(const core::Feed& feed);
-    std::vector<core::Feed> listFeeds();
-    std::optional<core::Feed> findFeedById(const core::FeedId& id);
+    std::vector<core::Feed> listFeeds(const core::ProjectId& projectId);
+    std::optional<core::Feed> findFeedById(const core::ProjectId& projectId, const core::FeedId& id);
     core::Feed updateFeed(const core::Feed& feed);
-    void deleteFeed(const core::FeedId& id);
+    void deleteFeed(const core::ProjectId& projectId, const core::FeedId& id);
 
 private:
     db::SqliteConnection& connection_;

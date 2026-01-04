@@ -8,6 +8,7 @@ namespace projection::server {
 namespace {
 
 constexpr const char* kDefaultDbPath = "./data/db/projection.db";
+constexpr const char* kDefaultWebRoot = "";
 constexpr int kDefaultPort = 8080;
 constexpr int kDefaultRendererPort = 5050;
 constexpr bool kDefaultVerbose = false;
@@ -39,7 +40,7 @@ std::string parseOptionValue(int& index, int argc, char* argv[], const std::stri
 }  // namespace
 
 ServerConfig parseServerConfig(int argc, char* argv[]) {
-    ServerConfig config{kDefaultDbPath, kDefaultPort, kDefaultRendererPort, kDefaultVerbose};
+    ServerConfig config{kDefaultDbPath, kDefaultWebRoot, kDefaultPort, kDefaultRendererPort, kDefaultVerbose};
 
     for (int i = 1; i < argc; ++i) {
         std::string arg(argv[i]);
@@ -49,6 +50,13 @@ ServerConfig parseServerConfig(int argc, char* argv[]) {
             config.databasePath = arg.substr(5);
             if (config.databasePath.empty()) {
                 throw std::invalid_argument("Missing value for --db");
+            }
+        } else if (arg == "--web-root") {
+            config.webRoot = parseOptionValue(i, argc, argv, "--web-root");
+        } else if (startsWith(arg, "--web-root=")) {
+            config.webRoot = arg.substr(11);
+            if (config.webRoot.empty()) {
+                throw std::invalid_argument("Missing value for --web-root");
             }
         } else if (arg == "--port") {
             config.httpPort = parsePort(parseOptionValue(i, argc, argv, "--port"));

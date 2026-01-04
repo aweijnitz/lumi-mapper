@@ -31,7 +31,7 @@ TEST_CASE("Scene findSurface returns matching surfaces", "[scene]") {
   Surface surfaceA{makeSurfaceId("A"), "A", quad, makeFeedId("feed-1")};
   Surface surfaceB{makeSurfaceId("B"), "B", quad, makeFeedId("feed-2")};
 
-  Scene scene{makeSceneId("scene"), "My Scene", "desc", {surfaceA, surfaceB}};
+  Scene scene{makeProjectId("project-1"), makeSceneId("scene"), "My Scene", "desc", {surfaceA, surfaceB}};
 
   REQUIRE(scene.findSurface(makeSurfaceId("A")) != nullptr);
   REQUIRE(scene.findSurface(makeSurfaceId("B")) != nullptr);
@@ -44,26 +44,27 @@ TEST_CASE("Scene findSurface returns matching surfaces", "[scene]") {
 }
 
 TEST_CASE("Scene consistency validates surfaces and feed references", "[scene]") {
-  Feed feed1{makeFeedId("feed-1"), "Camera", FeedType::Camera, "{}"};
-  Feed feed2{makeFeedId("feed-2"), "Video", FeedType::VideoFile, "{}"};
+  Feed feed1{makeProjectId("project-1"), makeFeedId("feed-1"), "Camera", FeedType::Camera, "{}"};
+  Feed feed2{makeProjectId("project-1"), makeFeedId("feed-2"), "Video", FeedType::VideoFile, "{}"};
 
   std::vector<Vec2> quad{{0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f}};
   Surface surfaceGood{makeSurfaceId("A"), "A", quad, feed1.getId()};
   Surface surfaceMissingFeed{makeSurfaceId("B"), "B", quad, makeFeedId("missing")};
 
-  Scene validScene{makeSceneId("scene-1"), "Valid", "", {surfaceGood}};
+  Scene validScene{makeProjectId("project-1"), makeSceneId("scene-1"), "Valid", "", {surfaceGood}};
   REQUIRE(validScene.isConsistent({feed1, feed2}));
 
-  Scene missingFeedScene{makeSceneId("scene-2"), "Invalid", "", {surfaceMissingFeed}};
+  Scene missingFeedScene{makeProjectId("project-1"), makeSceneId("scene-2"), "Invalid", "", {surfaceMissingFeed}};
   REQUIRE(!missingFeedScene.isConsistent({feed1}));
 
   Surface invalidSurface{makeSurfaceId("C"), "Invalid", {}, feed1.getId()};
-  Scene invalidSurfaceScene{makeSceneId("scene-3"), "InvalidSurface", "", {invalidSurface}};
+  Scene invalidSurfaceScene{makeProjectId("project-1"), makeSceneId("scene-3"), "InvalidSurface", "",
+                            {invalidSurface}};
   REQUIRE(!invalidSurfaceScene.isConsistent({feed1}));
 }
 
 TEST_CASE("Cue stores references to scenes and surface parameter snapshots", "[cue]") {
-  Cue cue{makeCueId("cue-1"), "Intro", makeSceneId("scene-1")};
+  Cue cue{makeProjectId("project-1"), makeCueId("cue-1"), "Intro", makeSceneId("scene-1")};
   cue.getSurfaceOpacities()[makeSurfaceId("surface-1")] = 0.75f;
   cue.getSurfaceBrightnesses()[makeSurfaceId("surface-1")] = 0.6f;
 

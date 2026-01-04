@@ -6,6 +6,8 @@
 #include <stdexcept>
 #include <sstream>
 #include <filesystem>
+#include <fstream>
+#include <vector>
 #include <unordered_map>
 #include <unordered_set>
 #include <optional>
@@ -13,6 +15,7 @@
 #include "projection/core/Serialization.h"
 #include "projection/core/RendererProtocol.h"
 #include "projection/core/Validation.h"
+#include "projection/core/Project.h"
 
 namespace projection::server::http {
 
@@ -20,14 +23,16 @@ using nlohmann::json;
 
 HttpServer::HttpServer(repo::FeedRepository& feedRepository, repo::SceneRepository& sceneRepository,
                        repo::CueRepository& cueRepository, repo::ProjectRepository& projectRepository,
-                       std::shared_ptr<renderer::RendererRegistry> rendererRegistry, bool verbose)
+                       std::shared_ptr<renderer::RendererRegistry> rendererRegistry, bool verbose,
+                       std::string webRoot)
     : feedRepository_(feedRepository),
       sceneRepository_(sceneRepository),
       cueRepository_(cueRepository),
       projectRepository_(projectRepository),
       rendererRegistry_(std::move(rendererRegistry)),
       server_(std::make_unique<::httplib::Server>()),
-      verbose_(verbose) {
+      verbose_(verbose),
+      webRoot_(std::move(webRoot)) {
     registerRoutes();
 }
 
@@ -49,13 +54,36 @@ void HttpServer::registerRoutes() {
     };
     (void)log;
 
-    server_->Post("/feeds", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+    auto registerGet = [this](const std::string& path, ::httplib::Server::Handler handler) {
+        server_->Get("/api" + path, handler);
+    };
+    auto registerPost = [this](const std::string& path, ::httplib::Server::Handler handler) {
+        server_->Post("/api" + path, handler);
+    };
+    auto registerPut = [this](const std::string& path, ::httplib::Server::Handler handler) {
+        server_->Put("/api" + path, handler);
+    };
+    auto registerDelete = [this](const std::string& path, ::httplib::Server::Handler handler) {
+        server_->Delete("/api" + path, handler);
+    };
+
+    registerPost(R"(/projects/([^/]+)/feeds)", [this](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
+            if (req.matches.size() < 2) {
+                respondWithError(res, 400, "Missing project id");
+                return;
+            }
+            core::ProjectId projectId{req.matches[1]};
             auto body = json::parse(req.body);
             auto feed = body.get<core::Feed>();
+            if (feed.getProjectId() != projectId) {
+                respondWithError(res, 400, "Feed projectId does not match path project id");
+                return;
+            }
             auto created = feedRepository_.createFeed(feed);
             if (verbose_) {
-                std::cerr << "[http] Created feed id=" << created.getId().value << " name=" << created.getName()
+                std::cerr << "[http] Created feed project=" << created.getProjectId().value
+                          << " id=" << created.getId().value << " name=" << created.getName()
                           << std::endl;
             }
             res.status = 201;
@@ -65,15 +93,20 @@ void HttpServer::registerRoutes() {
         }
     });
 
-    server_->Put(R"(/feeds/(.+))", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+    registerPut(R"(/projects/([^/]+)/feeds/(.+))", [this](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
-            if (req.matches.size() < 2) {
-                respondWithError(res, 400, "Missing feed id");
+            if (req.matches.size() < 3) {
+                respondWithError(res, 400, "Missing project or feed id");
                 return;
             }
+            core::ProjectId projectId{req.matches[1]};
             auto body = json::parse(req.body);
             auto feed = body.get<core::Feed>();
-            feed.setId(core::FeedId{req.matches[1]});
+            if (feed.getProjectId() != projectId) {
+                respondWithError(res, 400, "Feed projectId does not match path project id");
+                return;
+            }
+            feed.setId(core::FeedId{req.matches[2]});
             auto updated = feedRepository_.updateFeed(feed);
             res.status = 200;
             res.set_content(json(updated).dump(), "application/json");
@@ -82,15 +115,16 @@ void HttpServer::registerRoutes() {
         }
     });
 
-    server_->Delete(R"(/feeds/(.+))", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+    registerDelete(R"(/projects/([^/]+)/feeds/(.+))", [this](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
-            if (req.matches.size() < 2) {
-                respondWithError(res, 400, "Missing feed id");
+            if (req.matches.size() < 3) {
+                respondWithError(res, 400, "Missing project or feed id");
                 return;
             }
-            core::FeedId feedId{req.matches[1]};
+            core::ProjectId projectId{req.matches[1]};
+            core::FeedId feedId{req.matches[2]};
             // Guard: ensure no surfaces reference this feed
-            auto scenes = sceneRepository_.listScenes();
+            auto scenes = sceneRepository_.listScenes(projectId);
             for (const auto& scene : scenes) {
                 for (const auto& surface : scene.getSurfaces()) {
                     if (surface.getFeedId() == feedId) {
@@ -101,16 +135,21 @@ void HttpServer::registerRoutes() {
                     }
                 }
             }
-            feedRepository_.deleteFeed(feedId);
+            feedRepository_.deleteFeed(projectId, feedId);
             res.status = 204;
         } catch (const std::exception& ex) {
             respondWithError(res, 400, ex.what());
         }
     });
 
-    server_->Get("/feeds", [this](const ::httplib::Request&, ::httplib::Response& res) {
+    registerGet(R"(/projects/([^/]+)/feeds)", [this](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
-            const auto feeds = feedRepository_.listFeeds();
+            if (req.matches.size() < 2) {
+                respondWithError(res, 400, "Missing project id");
+                return;
+            }
+            core::ProjectId projectId{req.matches[1]};
+            const auto feeds = feedRepository_.listFeeds(projectId);
             res.status = 200;
             res.set_content(json(feeds).dump(), "application/json");
         } catch (const std::exception& ex) {
@@ -118,16 +157,26 @@ void HttpServer::registerRoutes() {
         }
     });
 
-    server_->Post("/scenes", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+    registerPost(R"(/projects/([^/]+)/scenes)", [this](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
+            if (req.matches.size() < 2) {
+                respondWithError(res, 400, "Missing project id");
+                return;
+            }
+            core::ProjectId projectId{req.matches[1]};
             auto body = json::parse(req.body);
             auto scene = body.get<core::Scene>();
+            if (scene.getProjectId() != projectId) {
+                respondWithError(res, 400, "Scene projectId does not match path project id");
+                return;
+            }
             if (verbose_) {
-                std::cerr << "[http] Received scene create id=" << scene.getId().value << " name=" << scene.getName()
+                std::cerr << "[http] Received scene create project=" << scene.getProjectId().value
+                          << " id=" << scene.getId().value << " name=" << scene.getName()
                           << " surfaces=" << scene.getSurfaces().size() << std::endl;
             }
 
-            auto feeds = feedRepository_.listFeeds();
+            auto feeds = feedRepository_.listFeeds(projectId);
             std::string error;
             if (!core::validateSceneFeeds(scene, feeds, error)) {
                 respondWithError(res, 400, error);
@@ -145,17 +194,22 @@ void HttpServer::registerRoutes() {
         }
     });
 
-    server_->Put(R"(/scenes/(.+))", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+    registerPut(R"(/projects/([^/]+)/scenes/(.+))", [this](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
-            if (req.matches.size() < 2) {
-                respondWithError(res, 400, "Missing scene id");
+            if (req.matches.size() < 3) {
+                respondWithError(res, 400, "Missing project or scene id");
                 return;
             }
+            core::ProjectId projectId{req.matches[1]};
             auto body = json::parse(req.body);
             auto scene = body.get<core::Scene>();
-            scene.setId(core::SceneId{req.matches[1]});
+            if (scene.getProjectId() != projectId) {
+                respondWithError(res, 400, "Scene projectId does not match path project id");
+                return;
+            }
+            scene.setId(core::SceneId{req.matches[2]});
 
-            auto feeds = feedRepository_.listFeeds();
+            auto feeds = feedRepository_.listFeeds(projectId);
             std::string error;
             if (!core::validateSceneFeeds(scene, feeds, error)) {
                 respondWithError(res, 400, error);
@@ -170,15 +224,17 @@ void HttpServer::registerRoutes() {
         }
     });
 
-    server_->Delete(R"(/scenes/(.+))", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+    registerDelete(R"(/projects/([^/]+)/scenes/(.+))",
+                   [this](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
-            if (req.matches.size() < 2) {
-                respondWithError(res, 400, "Missing scene id");
+            if (req.matches.size() < 3) {
+                respondWithError(res, 400, "Missing project or scene id");
                 return;
             }
-            core::SceneId sceneId{req.matches[1]};
+            core::ProjectId projectId{req.matches[1]};
+            core::SceneId sceneId{req.matches[2]};
             // Guard: ensure no cues reference this scene
-            auto cues = cueRepository_.listCues();
+            auto cues = cueRepository_.listCues(projectId);
             for (const auto& cue : cues) {
                 if (cue.getSceneId() == sceneId) {
                     respondWithError(res, 400,
@@ -187,16 +243,21 @@ void HttpServer::registerRoutes() {
                     return;
                 }
             }
-            sceneRepository_.deleteScene(sceneId);
+            sceneRepository_.deleteScene(projectId, sceneId);
             res.status = 204;
         } catch (const std::exception& ex) {
             respondWithError(res, 400, ex.what());
         }
     });
 
-    server_->Get("/cues", [this](const ::httplib::Request&, ::httplib::Response& res) {
+    registerGet(R"(/projects/([^/]+)/cues)", [this](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
-            const auto cues = cueRepository_.listCues();
+            if (req.matches.size() < 2) {
+                respondWithError(res, 400, "Missing project id");
+                return;
+            }
+            core::ProjectId projectId{req.matches[1]};
+            const auto cues = cueRepository_.listCues(projectId);
             res.status = 200;
             res.set_content(json(cues).dump(), "application/json");
         } catch (const std::exception& ex) {
@@ -204,11 +265,20 @@ void HttpServer::registerRoutes() {
         }
     });
 
-    server_->Post("/cues", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+    registerPost(R"(/projects/([^/]+)/cues)", [this](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
+            if (req.matches.size() < 2) {
+                respondWithError(res, 400, "Missing project id");
+                return;
+            }
+            core::ProjectId projectId{req.matches[1]};
             auto body = json::parse(req.body);
             auto cue = body.get<core::Cue>();
-            auto scene = sceneRepository_.findSceneById(cue.getSceneId());
+            if (cue.getProjectId() != projectId) {
+                respondWithError(res, 400, "Cue projectId does not match path project id");
+                return;
+            }
+            auto scene = sceneRepository_.findSceneById(projectId, cue.getSceneId());
             if (!scene.has_value()) {
                 respondWithError(res, 400, "Scene does not exist for cue");
                 return;
@@ -226,16 +296,21 @@ void HttpServer::registerRoutes() {
         }
     });
 
-    server_->Put(R"(/cues/(.+))", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+    registerPut(R"(/projects/([^/]+)/cues/(.+))", [this](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
-            if (req.matches.size() < 2) {
-                respondWithError(res, 400, "Missing cue id");
+            if (req.matches.size() < 3) {
+                respondWithError(res, 400, "Missing project or cue id");
                 return;
             }
+            core::ProjectId projectId{req.matches[1]};
             auto body = json::parse(req.body);
             auto cue = body.get<core::Cue>();
-            cue.setId(core::CueId{req.matches[1]});
-            auto scene = sceneRepository_.findSceneById(cue.getSceneId());
+            if (cue.getProjectId() != projectId) {
+                respondWithError(res, 400, "Cue projectId does not match path project id");
+                return;
+            }
+            cue.setId(core::CueId{req.matches[2]});
+            auto scene = sceneRepository_.findSceneById(projectId, cue.getSceneId());
             if (!scene.has_value()) {
                 respondWithError(res, 400, "Scene does not exist for cue");
                 return;
@@ -253,35 +328,41 @@ void HttpServer::registerRoutes() {
         }
     });
 
-    server_->Delete(R"(/cues/(.+))", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+    registerDelete(R"(/projects/([^/]+)/cues/(.+))", [this](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
-            if (req.matches.size() < 2) {
-                respondWithError(res, 400, "Missing cue id");
+            if (req.matches.size() < 3) {
+                respondWithError(res, 400, "Missing project or cue id");
                 return;
             }
-            const auto cueId = core::CueId{req.matches[1]};
+            const auto projectId = core::ProjectId{req.matches[1]};
+            const auto cueId = core::CueId{req.matches[2]};
             // Guard: ensure no projects reference this cue
-            auto projects = projectRepository_.listProjects();
-            for (const auto& project : projects) {
-                for (const auto& projectCueId : project.getCueOrder()) {
+            auto project = projectRepository_.findProjectById(projectId);
+            if (project.has_value()) {
+                for (const auto& projectCueId : project->getCueOrder()) {
                     if (projectCueId == cueId) {
                         respondWithError(res, 400,
                                          "Cannot delete cue " + cueId.value + " because it is referenced by project " +
-                                             project.getId().value + ".");
+                                             projectId.value + ".");
                         return;
                     }
                 }
             }
-            cueRepository_.deleteCue(core::CueId{req.matches[1]});
+            cueRepository_.deleteCue(projectId, cueId);
             res.status = 204;
         } catch (const std::exception& ex) {
             respondWithError(res, 400, ex.what());
         }
     });
 
-    server_->Get("/scenes", [this](const ::httplib::Request&, ::httplib::Response& res) {
+    registerGet(R"(/projects/([^/]+)/scenes)", [this](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
-            const auto scenes = sceneRepository_.listScenes();
+            if (req.matches.size() < 2) {
+                respondWithError(res, 400, "Missing project id");
+                return;
+            }
+            core::ProjectId projectId{req.matches[1]};
+            const auto scenes = sceneRepository_.listScenes(projectId);
             res.status = 200;
             res.set_content(json(scenes).dump(), "application/json");
         } catch (const std::exception& ex) {
@@ -289,14 +370,16 @@ void HttpServer::registerRoutes() {
         }
     });
 
-    server_->Get(R"(/scenes/(.+))", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+    registerGet(R"(/projects/([^/]+)/scenes/(.+))",
+                [this](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
-            if (req.matches.size() < 2) {
-                respondWithError(res, 400, "Missing scene id");
+            if (req.matches.size() < 3) {
+                respondWithError(res, 400, "Missing project or scene id");
                 return;
             }
-            core::SceneId sceneId{req.matches[1]};
-            auto scene = sceneRepository_.findSceneById(sceneId);
+            core::ProjectId projectId{req.matches[1]};
+            core::SceneId sceneId{req.matches[2]};
+            auto scene = sceneRepository_.findSceneById(projectId, sceneId);
             if (!scene.has_value()) {
                 respondWithError(res, 404, "Scene not found");
                 return;
@@ -309,7 +392,7 @@ void HttpServer::registerRoutes() {
         }
     });
 
-    server_->Get("/projects", [this](const ::httplib::Request&, ::httplib::Response& res) {
+    registerGet("/projects", [this](const ::httplib::Request&, ::httplib::Response& res) {
         try {
             const auto projects = projectRepository_.listProjects();
             res.status = 200;
@@ -319,7 +402,7 @@ void HttpServer::registerRoutes() {
         }
     });
 
-    server_->Get(R"(/projects/(.+))", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+    registerGet(R"(/projects/(.+))", [this](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
             if (req.matches.size() < 2) {
                 respondWithError(res, 400, "Missing project id");
@@ -338,11 +421,11 @@ void HttpServer::registerRoutes() {
         }
     });
 
-    server_->Post("/projects", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+    registerPost("/projects", [this](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
             auto body = json::parse(req.body);
             auto project = body.get<core::Project>();
-            auto cues = cueRepository_.listCues();
+            auto cues = cueRepository_.listCues(project.getId());
             std::string error;
             if (!core::validateProjectCues(project, cues, error)) {
                 respondWithError(res, 400, error);
@@ -356,7 +439,7 @@ void HttpServer::registerRoutes() {
         }
     });
 
-    server_->Put(R"(/projects/(.+))", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+    registerPut(R"(/projects/(.+))", [this](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
             if (req.matches.size() < 2) {
                 respondWithError(res, 400, "Missing project id");
@@ -365,7 +448,7 @@ void HttpServer::registerRoutes() {
             auto body = json::parse(req.body);
             auto project = body.get<core::Project>();
             project.setId(core::ProjectId{req.matches[1]});
-            auto cues = cueRepository_.listCues();
+            auto cues = cueRepository_.listCues(project.getId());
             std::string error;
             if (!core::validateProjectCues(project, cues, error)) {
                 respondWithError(res, 400, error);
@@ -379,7 +462,7 @@ void HttpServer::registerRoutes() {
         }
     });
 
-    server_->Delete(R"(/projects/(.+))", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+    registerDelete(R"(/projects/(.+))", [this](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
             if (req.matches.size() < 2) {
                 respondWithError(res, 400, "Missing project id");
@@ -408,16 +491,22 @@ void HttpServer::registerRoutes() {
         res.set_content(json({{"status", "ok"}, {"renderers", names}}).dump(), "application/json");
     };
 
-    server_->Post("/renderer/ping", handleRendererPing);
-    server_->Get("/renderer/ping", handleRendererPing);
+    registerPost("/renderer/ping", handleRendererPing);
+    registerGet("/renderer/ping", handleRendererPing);
 
-    server_->Post("/renderer/loadScene", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+    registerPost(R"(/projects/([^/]+)/renderer/loadScene)",
+                 [this](const ::httplib::Request& req, ::httplib::Response& res) {
         if (!rendererRegistry_) {
             respondWithError(res, 500, "Renderer registry not configured");
             return;
         }
 
         try {
+            if (req.matches.size() < 2) {
+                respondWithError(res, 400, "Missing project id");
+                return;
+            }
+            core::ProjectId projectId{req.matches[1]};
             auto body = json::parse(req.body);
             if (!body.contains("sceneId") || !body["sceneId"].is_string()) {
                 respondWithError(res, 400, "Missing or invalid sceneId");
@@ -425,7 +514,7 @@ void HttpServer::registerRoutes() {
             }
 
             core::SceneId sceneId{body["sceneId"].get<std::string>()};
-            auto scene = sceneRepository_.findSceneById(sceneId);
+            auto scene = sceneRepository_.findSceneById(projectId, sceneId);
             if (!scene.has_value()) {
                 respondWithError(res, 400, "Scene does not exist");
                 return;
@@ -439,8 +528,8 @@ void HttpServer::registerRoutes() {
             }
 
             if (verbose_) {
-                std::cerr << "[http] Forwarding scene " << sceneId.value << " to renderer with " << feeds.size()
-                          << " feeds" << std::endl;
+                std::cerr << "[http] Forwarding scene project=" << projectId.value << " id=" << sceneId.value
+                          << " to renderer with " << feeds.size() << " feeds" << std::endl;
             }
             core::RendererMessage message{};
             message.type = core::RendererMessageType::LoadSceneDefinition;
@@ -461,7 +550,7 @@ void HttpServer::registerRoutes() {
         }
     });
 
-    server_->Post("/demo/two-video-test", [this](const ::httplib::Request&, ::httplib::Response& res) {
+    registerPost("/demo/two-video-test", [this](const ::httplib::Request&, ::httplib::Response& res) {
         if (!rendererRegistry_) {
             respondWithError(res, 500, "Renderer registry not configured");
             return;
@@ -469,6 +558,7 @@ void HttpServer::registerRoutes() {
 
         try {
             const auto suffix = generateCommandId();
+            const auto projectId = core::ProjectId{"demo-" + suffix};
 
             auto findAssetPath = [](const std::string& filename) -> std::optional<std::filesystem::path> {
                 const std::vector<std::filesystem::path> candidates = {
@@ -490,11 +580,15 @@ void HttpServer::registerRoutes() {
                 return;
             }
 
+            core::Project demoProject(projectId, "Demo Project " + suffix, "Auto-generated demo project", {},
+                                      core::ProjectSettings{});
+            projectRepository_.createProject(demoProject);
+
             nlohmann::json clipAConfig{{"filePath", clipAPath->string()}};
             nlohmann::json clipBConfig{{"filePath", clipBPath->string()}};
 
-            core::Feed feedA(core::FeedId{}, "Demo Clip A", core::FeedType::VideoFile, clipAConfig.dump());
-            core::Feed feedB(core::FeedId{}, "Demo Clip B", core::FeedType::VideoFile, clipBConfig.dump());
+            core::Feed feedA(projectId, core::FeedId{}, "Demo Clip A", core::FeedType::VideoFile, clipAConfig.dump());
+            core::Feed feedB(projectId, core::FeedId{}, "Demo Clip B", core::FeedType::VideoFile, clipBConfig.dump());
 
             feedA = feedRepository_.createFeed(feedA);
             feedB = feedRepository_.createFeed(feedB);
@@ -505,10 +599,10 @@ void HttpServer::registerRoutes() {
             core::Surface surfaceA(core::SurfaceId{"demo-surface-a-" + suffix}, "Demo Surface A", quadA, feedA.getId());
             core::Surface surfaceB(core::SurfaceId{"demo-surface-b-" + suffix}, "Demo Surface B", quadB, feedB.getId());
 
-            core::Scene scene(core::SceneId{}, "Two Video Demo Scene", "Auto-generated demo scene",
+            core::Scene scene(projectId, core::SceneId{}, "Two Video Demo Scene", "Auto-generated demo scene",
                               std::vector<core::Surface>{surfaceA, surfaceB});
 
-            auto feeds = feedRepository_.listFeeds();
+            auto feeds = feedRepository_.listFeeds(projectId);
             std::string validationError;
             if (!core::validateSceneFeeds(scene, feeds, validationError)) {
                 respondWithError(res, 400, validationError);
@@ -525,9 +619,9 @@ void HttpServer::registerRoutes() {
             }
 
             if (verbose_) {
-                std::cerr << "[http] Demo endpoint created scene " << createdScene.getId().value << " with feeds "
-                          << feedA.getId().value << "," << feedB.getId().value << " -> sending to renderer"
-                          << std::endl;
+                std::cerr << "[http] Demo endpoint created project " << projectId.value << " scene "
+                          << createdScene.getId().value << " with feeds " << feedA.getId().value << ","
+                          << feedB.getId().value << " -> sending to renderer" << std::endl;
             }
             core::RendererMessage message{};
             message.type = core::RendererMessageType::LoadSceneDefinition;
@@ -540,7 +634,8 @@ void HttpServer::registerRoutes() {
                 return;
             }
 
-            json payload{{"sceneId", createdScene.getId().value},
+            json payload{{"projectId", projectId.value},
+                         {"sceneId", createdScene.getId().value},
                          {"feedIds", json::array({feedA.getId().value, feedB.getId().value})},
                          {"surfaceIds", json::array({surfaceA.getId().value, surfaceB.getId().value})}};
             res.status = 200;
@@ -548,6 +643,89 @@ void HttpServer::registerRoutes() {
         } catch (const std::exception& ex) {
             respondWithError(res, 500, ex.what());
         }
+    });
+
+    registerPost("/demo/clear-projects", [this](const ::httplib::Request&, ::httplib::Response& res) {
+        try {
+            const auto projects = projectRepository_.listProjects();
+            std::size_t deleted = 0;
+            for (const auto& project : projects) {
+                if (project.getId().value.rfind("demo-", 0) == 0) {
+                    projectRepository_.deleteProject(project.getId());
+                    ++deleted;
+                }
+            }
+            res.status = 200;
+            res.set_content(json({{"deletedProjects", deleted}}).dump(), "application/json");
+        } catch (const std::exception& ex) {
+            respondWithError(res, 500, ex.what());
+        }
+    });
+
+    if (!webRoot_.empty()) {
+        registerStaticRoutes();
+    }
+}
+
+namespace {
+bool hasExtension(const std::string& path) {
+    auto dot = path.find_last_of('.');
+    auto slash = path.find_last_of('/');
+    if (dot == std::string::npos) {
+        return false;
+    }
+    if (slash == std::string::npos) {
+        return true;
+    }
+    return dot > slash;
+}
+
+bool isApiPath(const std::string& path) {
+    return path.rfind("/api", 0) == 0;
+}
+
+bool readFile(const std::filesystem::path& path, std::string& contents) {
+    std::ifstream file(path, std::ios::in | std::ios::binary);
+    if (!file) {
+        return false;
+    }
+    std::ostringstream buffer;
+    buffer << file.rdbuf();
+    contents = buffer.str();
+    return true;
+}
+}  // namespace
+
+void HttpServer::registerStaticRoutes() {
+    std::filesystem::path root(webRoot_);
+    if (!std::filesystem::exists(root) || !std::filesystem::is_directory(root)) {
+        if (verbose_) {
+            std::cerr << "[http] Web root not found: " << root.string() << std::endl;
+        }
+        return;
+    }
+
+    if (!server_->set_mount_point("/", root.string())) {
+        if (verbose_) {
+            std::cerr << "[http] Failed to mount web root: " << root.string() << std::endl;
+        }
+        return;
+    }
+
+    const auto indexPath = (root / "index.html").string();
+    server_->set_error_handler([indexPath](const ::httplib::Request& req, ::httplib::Response& res) {
+        if (res.status != 404 || req.method != "GET") {
+            return;
+        }
+        if (isApiPath(req.path) || hasExtension(req.path)) {
+            return;
+        }
+        std::string contents;
+        if (!readFile(indexPath, contents)) {
+            return;
+        }
+        res.status = 200;
+        res.set_content(contents, "text/html");
     });
 }
 
@@ -577,7 +755,7 @@ bool HttpServer::collectFeedsForScene(const core::Scene& scene, std::vector<core
     }
 
     std::unordered_map<std::string, core::Feed> feedsById;
-    for (const auto& feed : feedRepository_.listFeeds()) {
+    for (const auto& feed : feedRepository_.listFeeds(scene.getProjectId())) {
         feedsById.emplace(feed.getId().value, feed);
     }
 

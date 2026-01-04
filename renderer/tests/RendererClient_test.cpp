@@ -163,7 +163,8 @@ class TestServer {
     RendererMessage loadScene{};
     loadScene.type = RendererMessageType::LoadScene;
     loadScene.commandId = "cmd-load";
-    loadScene.loadScene = projection::core::LoadSceneMessage{projection::core::SceneId{"scene-1"}};
+    loadScene.loadScene =
+        projection::core::LoadSceneMessage{projection::core::ProjectId{"project-1"}, projection::core::SceneId{"scene-1"}};
     std::string outbound = nlohmann::json(loadScene).dump() + "\n";
     ::send(client_, outbound.c_str(), outbound.size(), 0);
 

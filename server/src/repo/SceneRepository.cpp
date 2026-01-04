@@ -24,9 +24,12 @@ core::Scene SceneRepository::createScene(const core::Scene& scene) {
     if (handle == nullptr) {
         throw std::runtime_error("SQLite connection is not open");
     }
+    if (scene.getProjectId().value.empty()) {
+        throw std::runtime_error("Scene project id must not be empty");
+    }
 
     const std::string idValue = scene.getId().value.empty() ? generateId() : scene.getId().value;
-    const char* sql = "INSERT INTO scenes(id, name, description) VALUES(?, ?, ?);";
+    const char* sql = "INSERT INTO scenes(project_id, id, name, description) VALUES(?, ?, ?, ?);";
 
     sqlite3_stmt* stmt = nullptr;
     int result = sqlite3_prepare_v2(handle, sql, -1, &stmt, nullptr);
@@ -35,6 +38,12 @@ core::Scene SceneRepository::createScene(const core::Scene& scene) {
     }
 
     int bindIndex = 1;
+    result = sqlite3_bind_text(stmt, bindIndex++, scene.getProjectId().value.c_str(), -1, SQLITE_TRANSIENT);
+    if (result != SQLITE_OK) {
+        sqlite3_finalize(stmt);
+        throw std::runtime_error("Failed to bind scene project id: " + std::string(sqlite3_errmsg(handle)));
+    }
+
     result = sqlite3_bind_text(stmt, bindIndex++, idValue.c_str(), -1, SQLITE_TRANSIENT);
     if (result != SQLITE_OK) {
         sqlite3_finalize(stmt);
@@ -66,24 +75,30 @@ core::Scene SceneRepository::createScene(const core::Scene& scene) {
 
     repo::SurfaceRepository surfaceRepo(connection_);
     for (const auto& surface : scene.getSurfaces()) {
-        surfaceRepo.createSurface(surface, created.getId());
+        surfaceRepo.createSurface(surface, scene.getProjectId(), created.getId());
     }
 
     return created;
 }
 
-std::vector<core::Scene> SceneRepository::listScenes() {
+std::vector<core::Scene> SceneRepository::listScenes(const core::ProjectId& projectId) {
     sqlite3* handle = connection_.getHandle();
     if (handle == nullptr) {
         throw std::runtime_error("SQLite connection is not open");
     }
 
-    const char* sql = "SELECT id, name, description FROM scenes ORDER BY id;";
+    const char* sql = "SELECT id, name, description FROM scenes WHERE project_id=? ORDER BY id;";
 
     sqlite3_stmt* stmt = nullptr;
     int result = sqlite3_prepare_v2(handle, sql, -1, &stmt, nullptr);
     if (result != SQLITE_OK) {
         throw std::runtime_error("Failed to prepare scene select statement: " + std::string(sqlite3_errmsg(handle)));
+    }
+
+    result = sqlite3_bind_text(stmt, 1, projectId.value.c_str(), -1, SQLITE_TRANSIENT);
+    if (result != SQLITE_OK) {
+        sqlite3_finalize(stmt);
+        throw std::runtime_error("Failed to bind project id for scene list: " + std::string(sqlite3_errmsg(handle)));
     }
 
     std::vector<core::Scene> scenes;
@@ -96,7 +111,7 @@ std::vector<core::Scene> SceneRepository::listScenes() {
         std::string name = nameText ? reinterpret_cast<const char*>(nameText) : "";
         std::string description = descText ? reinterpret_cast<const char*>(descText) : "";
 
-        scenes.emplace_back(core::Scene(core::SceneId(idString), name, description, {}));
+        scenes.emplace_back(core::Scene(projectId, core::SceneId(idString), name, description, {}));
     }
 
     if (result != SQLITE_DONE) {
@@ -108,26 +123,33 @@ std::vector<core::Scene> SceneRepository::listScenes() {
 
     repo::SurfaceRepository surfaceRepo(connection_);
     for (auto& scene : scenes) {
-        scene.setSurfaces(surfaceRepo.listSurfacesForScene(scene.getId()));
+        scene.setSurfaces(surfaceRepo.listSurfacesForScene(projectId, scene.getId()));
     }
 
     return scenes;
 }
 
-std::optional<core::Scene> SceneRepository::findSceneById(const core::SceneId& sceneId) {
+std::optional<core::Scene> SceneRepository::findSceneById(const core::ProjectId& projectId,
+                                                          const core::SceneId& sceneId) {
     sqlite3* handle = connection_.getHandle();
     if (handle == nullptr) {
         throw std::runtime_error("SQLite connection is not open");
     }
 
-    const char* sql = "SELECT id, name, description FROM scenes WHERE id = ? LIMIT 1;";
+    const char* sql = "SELECT id, name, description FROM scenes WHERE project_id = ? AND id = ? LIMIT 1;";
     sqlite3_stmt* stmt = nullptr;
     int result = sqlite3_prepare_v2(handle, sql, -1, &stmt, nullptr);
     if (result != SQLITE_OK) {
         throw std::runtime_error("Failed to prepare scene select statement: " + std::string(sqlite3_errmsg(handle)));
     }
 
-    result = sqlite3_bind_text(stmt, 1, sceneId.value.c_str(), -1, SQLITE_TRANSIENT);
+    result = sqlite3_bind_text(stmt, 1, projectId.value.c_str(), -1, SQLITE_TRANSIENT);
+    if (result != SQLITE_OK) {
+        sqlite3_finalize(stmt);
+        throw std::runtime_error("Failed to bind scene project id: " + std::string(sqlite3_errmsg(handle)));
+    }
+
+    result = sqlite3_bind_text(stmt, 2, sceneId.value.c_str(), -1, SQLITE_TRANSIENT);
     if (result != SQLITE_OK) {
         sqlite3_finalize(stmt);
         throw std::runtime_error("Failed to bind scene id: " + std::string(sqlite3_errmsg(handle)));
@@ -142,8 +164,8 @@ std::optional<core::Scene> SceneRepository::findSceneById(const core::SceneId& s
         std::string description = descText ? reinterpret_cast<const char*>(descText) : "";
         sqlite3_finalize(stmt);
         repo::SurfaceRepository surfaceRepo(connection_);
-        auto surfaces = surfaceRepo.listSurfacesForScene(sceneId);
-        return core::Scene(sceneId, name, description, surfaces);
+        auto surfaces = surfaceRepo.listSurfacesForScene(projectId, sceneId);
+        return core::Scene(projectId, sceneId, name, description, surfaces);
     }
 
     if (result != SQLITE_DONE) {
@@ -155,7 +177,9 @@ std::optional<core::Scene> SceneRepository::findSceneById(const core::SceneId& s
     return std::nullopt;
 }
 
-bool SceneRepository::sceneExists(const core::SceneId& sceneId) { return findSceneById(sceneId).has_value(); }
+bool SceneRepository::sceneExists(const core::ProjectId& projectId, const core::SceneId& sceneId) {
+    return findSceneById(projectId, sceneId).has_value();
+}
 
 core::Scene SceneRepository::updateScene(const core::Scene& scene) {
     sqlite3* handle = connection_.getHandle();
@@ -165,8 +189,11 @@ core::Scene SceneRepository::updateScene(const core::Scene& scene) {
     if (scene.getId().value.empty()) {
         throw std::runtime_error("Scene id must not be empty for update");
     }
+    if (scene.getProjectId().value.empty()) {
+        throw std::runtime_error("Scene project id must not be empty for update");
+    }
 
-    const char* sql = "UPDATE scenes SET name=?, description=? WHERE id=?;";
+    const char* sql = "UPDATE scenes SET name=?, description=? WHERE project_id=? AND id=?;";
     sqlite3_stmt* stmt = nullptr;
     int result = sqlite3_prepare_v2(handle, sql, -1, &stmt, nullptr);
     if (result != SQLITE_OK) {
@@ -175,7 +202,8 @@ core::Scene SceneRepository::updateScene(const core::Scene& scene) {
 
     result = sqlite3_bind_text(stmt, 1, scene.getName().c_str(), -1, SQLITE_TRANSIENT);
     result |= sqlite3_bind_text(stmt, 2, scene.getDescription().c_str(), -1, SQLITE_TRANSIENT);
-    result |= sqlite3_bind_text(stmt, 3, scene.getId().value.c_str(), -1, SQLITE_TRANSIENT);
+    result |= sqlite3_bind_text(stmt, 3, scene.getProjectId().value.c_str(), -1, SQLITE_TRANSIENT);
+    result |= sqlite3_bind_text(stmt, 4, scene.getId().value.c_str(), -1, SQLITE_TRANSIENT);
     if (result != SQLITE_OK) {
         sqlite3_finalize(stmt);
         throw std::runtime_error("Failed to bind scene update fields: " + std::string(sqlite3_errmsg(handle)));
@@ -189,27 +217,28 @@ core::Scene SceneRepository::updateScene(const core::Scene& scene) {
 
     // Replace surfaces: delete and re-insert
     repo::SurfaceRepository surfaceRepo(connection_);
-    surfaceRepo.deleteSurfacesForScene(scene.getId());
+    surfaceRepo.deleteSurfacesForScene(scene.getProjectId(), scene.getId());
     for (const auto& surface : scene.getSurfaces()) {
-        surfaceRepo.createSurface(surface, scene.getId());
+        surfaceRepo.createSurface(surface, scene.getProjectId(), scene.getId());
     }
     return scene;
 }
 
-void SceneRepository::deleteScene(const core::SceneId& sceneId) {
+void SceneRepository::deleteScene(const core::ProjectId& projectId, const core::SceneId& sceneId) {
     sqlite3* handle = connection_.getHandle();
     if (handle == nullptr) {
         throw std::runtime_error("SQLite connection is not open");
     }
 
-    const char* sql = "DELETE FROM scenes WHERE id=?;";
+    const char* sql = "DELETE FROM scenes WHERE project_id=? AND id=?;";
     sqlite3_stmt* stmt = nullptr;
     int result = sqlite3_prepare_v2(handle, sql, -1, &stmt, nullptr);
     if (result != SQLITE_OK) {
         throw std::runtime_error("Failed to prepare scene delete statement: " + std::string(sqlite3_errmsg(handle)));
     }
 
-    result = sqlite3_bind_text(stmt, 1, sceneId.value.c_str(), -1, SQLITE_TRANSIENT);
+    result = sqlite3_bind_text(stmt, 1, projectId.value.c_str(), -1, SQLITE_TRANSIENT);
+    result |= sqlite3_bind_text(stmt, 2, sceneId.value.c_str(), -1, SQLITE_TRANSIENT);
     if (result != SQLITE_OK) {
         sqlite3_finalize(stmt);
         throw std::runtime_error("Failed to bind scene id for delete: " + std::string(sqlite3_errmsg(handle)));
@@ -223,7 +252,7 @@ void SceneRepository::deleteScene(const core::SceneId& sceneId) {
     sqlite3_finalize(stmt);
 
     repo::SurfaceRepository surfaceRepo(connection_);
-    surfaceRepo.deleteSurfacesForScene(sceneId);
+    surfaceRepo.deleteSurfacesForScene(projectId, sceneId);
 }
 
 }  // namespace projection::server::repo

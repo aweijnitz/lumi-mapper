@@ -138,7 +138,8 @@ void from_json(const json& j, Vec2& vec) {
 }
 
 void to_json(json& j, const Feed& feed) {
-  j = json{{"id", feed.getId().value},
+  j = json{{"projectId", feed.getProjectId().value},
+           {"id", feed.getId().value},
            {"name", feed.getName()},
            {"type", feed.getType()},
            {"configJson", feed.getConfigJson()}};
@@ -148,6 +149,7 @@ void from_json(const json& j, Feed& feed) {
   if (!j.is_object()) {
     throw std::runtime_error("Feed must be an object");
   }
+  const auto projectId = requireString(j, "projectId");
   const auto id = requireString(j, "id");
   const auto name = requireString(j, "name");
   const auto typeStr = requireString(j, "type");
@@ -162,7 +164,7 @@ void from_json(const json& j, Feed& feed) {
     throw std::runtime_error("Field 'configJson' must be a string or object");
   }
 
-  feed = Feed(FeedId{id}, name, parseFeedTypeString(typeStr), config);
+  feed = Feed(ProjectId{projectId}, FeedId{id}, name, parseFeedTypeString(typeStr), config);
 }
 
 void to_json(json& j, const Surface& surface) {
@@ -205,7 +207,8 @@ void from_json(const json& j, Surface& surface) {
 }
 
 void to_json(json& j, const Scene& scene) {
-  j = json{{"id", scene.getId().value},
+  j = json{{"projectId", scene.getProjectId().value},
+           {"id", scene.getId().value},
            {"name", scene.getName()},
            {"description", scene.getDescription()},
            {"surfaces", scene.getSurfaces()}};
@@ -215,6 +218,7 @@ void from_json(const json& j, Scene& scene) {
   if (!j.is_object()) {
     throw std::runtime_error("Scene must be an object");
   }
+  const auto projectId = requireString(j, "projectId");
   const auto id = requireString(j, "id");
   const auto name = requireString(j, "name");
   const auto description = requireString(j, "description");
@@ -231,11 +235,12 @@ void from_json(const json& j, Scene& scene) {
     surfaces.push_back(surfaceInstance);
   }
 
-  scene = Scene(SceneId{id}, name, description, surfaces);
+  scene = Scene(ProjectId{projectId}, SceneId{id}, name, description, surfaces);
 }
 
 void to_json(json& j, const Cue& cue) {
-  j = json{{"id", cue.getId().value},
+  j = json{{"projectId", cue.getProjectId().value},
+           {"id", cue.getId().value},
            {"name", cue.getName()},
            {"sceneId", cue.getSceneId().value},
            {"surfaceOpacities", surfaceValueArray(cue.getSurfaceOpacities())},
@@ -246,6 +251,7 @@ void from_json(const json& j, Cue& cue) {
   if (!j.is_object()) {
     throw std::runtime_error("Cue must be an object");
   }
+  const auto projectId = requireString(j, "projectId");
   const auto id = requireString(j, "id");
   const auto name = requireString(j, "name");
   const auto sceneId = requireString(j, "sceneId");
@@ -256,7 +262,7 @@ void from_json(const json& j, Cue& cue) {
   auto opacities = readSurfaceValueArray(opacitiesJson, "surfaceOpacities");
   auto brightnesses = readSurfaceValueArray(brightnessesJson, "surfaceBrightnesses");
 
-  cue = Cue(CueId{id}, name, SceneId{sceneId});
+  cue = Cue(ProjectId{projectId}, CueId{id}, name, SceneId{sceneId});
   cue.getSurfaceOpacities() = std::move(opacities);
   cue.getSurfaceBrightnesses() = std::move(brightnesses);
 }

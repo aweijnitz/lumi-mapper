@@ -24,7 +24,7 @@ bool validateSceneFeeds(const Scene& scene, const std::vector<Feed>& feeds, std:
 
     const auto& feedId = surface.getFeedId();
     auto feedIt = std::find_if(feeds.begin(), feeds.end(), [&](const Feed& feed) {
-      return feed.getId() == feedId;
+      return feed.getId() == feedId && feed.getProjectId() == scene.getProjectId();
     });
 
     if (feedIt == feeds.end()) {
@@ -38,6 +38,11 @@ bool validateSceneFeeds(const Scene& scene, const std::vector<Feed>& feeds, std:
 }
 
 bool validateCueForScene(const Cue& cue, const Scene& scene, std::string& errorMessage) {
+  if (cue.getProjectId() != scene.getProjectId()) {
+    errorMessage = "Cue '" + cue.getId().value + "' targets project '" + cue.getProjectId().value +
+                   "' which does not match scene project '" + scene.getProjectId().value + "'.";
+    return false;
+  }
   if (cue.getSceneId() != scene.getId()) {
     errorMessage = "Cue '" + cue.getId().value + "' targets scene '" + cue.getSceneId().value +
                    "' which does not match scene '" + scene.getId().value + "'.";
@@ -85,8 +90,14 @@ bool validateProjectCues(const Project& project, const std::vector<Cue>& cues, s
   }
 
   for (const auto& cueId : project.getCueOrder()) {
-    if (cueById.find(cueId.value) == cueById.end()) {
+    auto cueIt = cueById.find(cueId.value);
+    if (cueIt == cueById.end()) {
       errorMessage = "Project '" + project.getId().value + "' references missing cue '" + cueId.value + "'.";
+      return false;
+    }
+    if (cueIt->second->getProjectId() != project.getId()) {
+      errorMessage = "Project '" + project.getId().value + "' references cue '" + cueId.value +
+                     "' with mismatched project id.";
       return false;
     }
   }

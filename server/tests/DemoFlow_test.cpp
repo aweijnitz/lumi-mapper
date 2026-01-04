@@ -216,7 +216,7 @@ struct DemoHttpContext {
 bool waitForServer(httplib::Client& client, http::HttpServer& server) {
     for (int attempt = 0; attempt < 100; ++attempt) {
         if (server.isRunning()) {
-            if (auto res = client.Get("/feeds")) {
+            if (auto res = client.Get("/api/projects")) {
                 (void)res;
                 return true;
             }
@@ -254,22 +254,24 @@ TEST_CASE("Two video demo endpoint seeds feeds, scene, and renderer", "[http][de
     auto httpClient = makeClient(httpPort);
     REQUIRE(waitForServer(*httpClient, ctx.httpServer));
 
-    auto res = httpClient->Post("/demo/two-video-test", "{}", "application/json");
+    auto res = httpClient->Post("/api/demo/two-video-test", "{}", "application/json");
     REQUIRE(res != nullptr);
     REQUIRE(res->status == 200);
 
     auto body = nlohmann::json::parse(res->body);
+    REQUIRE(body.contains("projectId"));
     REQUIRE(body.contains("sceneId"));
     REQUIRE(body.contains("feedIds"));
     REQUIRE(body["feedIds"].is_array());
     REQUIRE(body["feedIds"].size() == 2);
 
+    const auto projectId = core::ProjectId{body["projectId"].get<std::string>()};
     const auto sceneId = core::SceneId{body["sceneId"].get<std::string>()};
-    auto feeds = ctx.feedRepo.listFeeds();
+    auto feeds = ctx.feedRepo.listFeeds(projectId);
     REQUIRE(feeds.size() == 2);
     REQUIRE(feeds[0].getName() == "Demo Clip A" || feeds[1].getName() == "Demo Clip A");
 
-    auto scene = ctx.sceneRepo.findSceneById(sceneId);
+    auto scene = ctx.sceneRepo.findSceneById(projectId, sceneId);
     REQUIRE(scene.has_value());
     REQUIRE(scene->getSurfaces().size() == 2);
     std::unordered_set<std::string> surfaceFeedIds;
@@ -285,6 +287,57 @@ TEST_CASE("Two video demo endpoint seeds feeds, scene, and renderer", "[http][de
     const auto& payload = *messages.front().loadSceneDefinition;
     REQUIRE(payload.scene.getId().value == sceneId.value);
     REQUIRE(payload.feeds.size() == 2);
+
+    std::filesystem::remove(dbPath);
+}
+
+TEST_CASE("Demo clear endpoint deletes demo projects", "[http][demo]") {
+    const auto httpPort = reservePort();
+    const auto dbPath = tempDbPath("demo_clear_projects.db");
+    auto registry = std::make_shared<renderer::RendererRegistry>();
+    registry->start(reservePort());
+    REQUIRE(waitForRegistry(*registry));
+    DemoHttpContext ctx(dbPath, registry);
+
+    ServerRunner runner(ctx.httpServer, httpPort);
+    auto httpClient = makeClient(httpPort);
+    REQUIRE(waitForServer(*httpClient, ctx.httpServer));
+
+    auto createDemo = httpClient->Post("/api/projects",
+                                       nlohmann::json{{"id", "demo-test-1"},
+                                                      {"name", "Demo"},
+                                                      {"description", ""},
+                                                      {"cueOrder", nlohmann::json::array()},
+                                                      {"settings", nlohmann::json::object()}}
+                                           .dump(),
+                                       "application/json");
+    REQUIRE(createDemo != nullptr);
+    REQUIRE(createDemo->status == 201);
+
+    auto createKeep = httpClient->Post("/api/projects",
+                                       nlohmann::json{{"id", "project-1"},
+                                                      {"name", "Keep"},
+                                                      {"description", ""},
+                                                      {"cueOrder", nlohmann::json::array()},
+                                                      {"settings", nlohmann::json::object()}}
+                                           .dump(),
+                                       "application/json");
+    REQUIRE(createKeep != nullptr);
+    REQUIRE(createKeep->status == 201);
+
+    auto clearRes = httpClient->Post("/api/demo/clear-projects", "{}", "application/json");
+    REQUIRE(clearRes != nullptr);
+    REQUIRE(clearRes->status == 200);
+    auto clearPayload = nlohmann::json::parse(clearRes->body);
+    REQUIRE(clearPayload["deletedProjects"] == 1);
+
+    auto listRes = httpClient->Get("/api/projects");
+    REQUIRE(listRes != nullptr);
+    REQUIRE(listRes->status == 200);
+    auto projects = nlohmann::json::parse(listRes->body);
+    REQUIRE(projects.is_array());
+    REQUIRE(projects.size() == 1);
+    REQUIRE(projects[0]["id"] == "project-1");
 
     std::filesystem::remove(dbPath);
 }

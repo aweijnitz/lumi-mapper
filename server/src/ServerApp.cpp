@@ -47,9 +47,13 @@ int ServerApp::run() {
         rendererRegistry_->start(config_.rendererPort);
 
         httpServer_ = std::make_unique<http::HttpServer>(*feedRepository_, *sceneRepository_, *cueRepository_,
-                                                         *projectRepository_, rendererRegistry_, config_.verbose);
+                                                         *projectRepository_, rendererRegistry_, config_.verbose,
+                                                         config_.webRoot);
         std::cout << "Database initialized at '" << dbPath.string() << "'" << std::endl;
         std::cout << "HTTP server listening on port " << config_.httpPort << std::endl;
+        if (!config_.webRoot.empty()) {
+            std::cout << "Serving web root from '" << config_.webRoot << "'" << std::endl;
+        }
         httpServer_->start(config_.httpPort);
     } catch (const std::exception& ex) {
         std::cerr << "Failed to start server: " << ex.what() << std::endl;

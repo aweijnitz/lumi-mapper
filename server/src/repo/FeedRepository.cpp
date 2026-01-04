@@ -24,9 +24,12 @@ core::Feed FeedRepository::createFeed(const core::Feed& feed) {
     if (handle == nullptr) {
         throw std::runtime_error("SQLite connection is not open");
     }
+    if (feed.getProjectId().value.empty()) {
+        throw std::runtime_error("Feed project id must not be empty");
+    }
 
     const std::string idValue = feed.getId().value.empty() ? generateId() : feed.getId().value;
-    const char* sql = "INSERT INTO feeds(id, name, type, config_json) VALUES(?, ?, ?, ?);";
+    const char* sql = "INSERT INTO feeds(project_id, id, name, type, config_json) VALUES(?, ?, ?, ?, ?);";
 
     sqlite3_stmt* stmt = nullptr;
     int result = sqlite3_prepare_v2(handle, sql, -1, &stmt, nullptr);
@@ -35,6 +38,12 @@ core::Feed FeedRepository::createFeed(const core::Feed& feed) {
     }
 
     int bindIndex = 1;
+    result = sqlite3_bind_text(stmt, bindIndex++, feed.getProjectId().value.c_str(), -1, SQLITE_TRANSIENT);
+    if (result != SQLITE_OK) {
+        sqlite3_finalize(stmt);
+        throw std::runtime_error("Failed to bind feed project id: " + std::string(sqlite3_errmsg(handle)));
+    }
+
     result = sqlite3_bind_text(stmt, bindIndex++, idValue.c_str(), -1, SQLITE_TRANSIENT);
     if (result != SQLITE_OK) {
         sqlite3_finalize(stmt);
@@ -72,18 +81,24 @@ core::Feed FeedRepository::createFeed(const core::Feed& feed) {
     return created;
 }
 
-std::vector<core::Feed> FeedRepository::listFeeds() {
+std::vector<core::Feed> FeedRepository::listFeeds(const core::ProjectId& projectId) {
     sqlite3* handle = connection_.getHandle();
     if (handle == nullptr) {
         throw std::runtime_error("SQLite connection is not open");
     }
 
-    const char* sql = "SELECT id, name, type, config_json FROM feeds ORDER BY id;";
+    const char* sql = "SELECT id, name, type, config_json FROM feeds WHERE project_id=? ORDER BY id;";
 
     sqlite3_stmt* stmt = nullptr;
     int result = sqlite3_prepare_v2(handle, sql, -1, &stmt, nullptr);
     if (result != SQLITE_OK) {
         throw std::runtime_error("Failed to prepare feed select statement: " + std::string(sqlite3_errmsg(handle)));
+    }
+
+    result = sqlite3_bind_text(stmt, 1, projectId.value.c_str(), -1, SQLITE_TRANSIENT);
+    if (result != SQLITE_OK) {
+        sqlite3_finalize(stmt);
+        throw std::runtime_error("Failed to bind project id for feed list: " + std::string(sqlite3_errmsg(handle)));
     }
 
     std::vector<core::Feed> feeds;
@@ -104,7 +119,7 @@ std::vector<core::Feed> FeedRepository::listFeeds() {
             throw std::runtime_error("Failed to parse feed type from database: " + typeStr);
         }
 
-        feeds.emplace_back(core::Feed(core::FeedId(idString), name, feedType, configJson));
+        feeds.emplace_back(core::Feed(projectId, core::FeedId(idString), name, feedType, configJson));
     }
 
     if (result != SQLITE_DONE) {
@@ -116,20 +131,26 @@ std::vector<core::Feed> FeedRepository::listFeeds() {
     return feeds;
 }
 
-std::optional<core::Feed> FeedRepository::findFeedById(const core::FeedId& feedId) {
+std::optional<core::Feed> FeedRepository::findFeedById(const core::ProjectId& projectId, const core::FeedId& feedId) {
     sqlite3* handle = connection_.getHandle();
     if (handle == nullptr) {
         throw std::runtime_error("SQLite connection is not open");
     }
 
-    const char* sql = "SELECT id, name, type, config_json FROM feeds WHERE id=? LIMIT 1;";
+    const char* sql = "SELECT id, name, type, config_json FROM feeds WHERE project_id=? AND id=? LIMIT 1;";
     sqlite3_stmt* stmt = nullptr;
     int result = sqlite3_prepare_v2(handle, sql, -1, &stmt, nullptr);
     if (result != SQLITE_OK) {
         throw std::runtime_error("Failed to prepare feed select statement: " + std::string(sqlite3_errmsg(handle)));
     }
 
-    result = sqlite3_bind_text(stmt, 1, feedId.value.c_str(), -1, SQLITE_TRANSIENT);
+    result = sqlite3_bind_text(stmt, 1, projectId.value.c_str(), -1, SQLITE_TRANSIENT);
+    if (result != SQLITE_OK) {
+        sqlite3_finalize(stmt);
+        throw std::runtime_error("Failed to bind feed project id: " + std::string(sqlite3_errmsg(handle)));
+    }
+
+    result = sqlite3_bind_text(stmt, 2, feedId.value.c_str(), -1, SQLITE_TRANSIENT);
     if (result != SQLITE_OK) {
         sqlite3_finalize(stmt);
         throw std::runtime_error("Failed to bind feed id: " + std::string(sqlite3_errmsg(handle)));
@@ -154,7 +175,7 @@ std::optional<core::Feed> FeedRepository::findFeedById(const core::FeedId& feedI
         }
 
         sqlite3_finalize(stmt);
-        return core::Feed(core::FeedId(idString), name, feedType, configJson);
+        return core::Feed(projectId, core::FeedId(idString), name, feedType, configJson);
     }
 
     sqlite3_finalize(stmt);
@@ -169,8 +190,11 @@ core::Feed FeedRepository::updateFeed(const core::Feed& feed) {
     if (feed.getId().value.empty()) {
         throw std::runtime_error("Feed id must not be empty for update");
     }
+    if (feed.getProjectId().value.empty()) {
+        throw std::runtime_error("Feed project id must not be empty for update");
+    }
 
-    const char* sql = "UPDATE feeds SET name=?, type=?, config_json=? WHERE id=?;";
+    const char* sql = "UPDATE feeds SET name=?, type=?, config_json=? WHERE project_id=? AND id=?;";
     sqlite3_stmt* stmt = nullptr;
     int result = sqlite3_prepare_v2(handle, sql, -1, &stmt, nullptr);
     if (result != SQLITE_OK) {
@@ -181,7 +205,8 @@ core::Feed FeedRepository::updateFeed(const core::Feed& feed) {
     result = sqlite3_bind_text(stmt, 1, feed.getName().c_str(), -1, SQLITE_TRANSIENT);
     result |= sqlite3_bind_text(stmt, 2, typeString.c_str(), -1, SQLITE_TRANSIENT);
     result |= sqlite3_bind_text(stmt, 3, feed.getConfigJson().c_str(), -1, SQLITE_TRANSIENT);
-    result |= sqlite3_bind_text(stmt, 4, feed.getId().value.c_str(), -1, SQLITE_TRANSIENT);
+    result |= sqlite3_bind_text(stmt, 4, feed.getProjectId().value.c_str(), -1, SQLITE_TRANSIENT);
+    result |= sqlite3_bind_text(stmt, 5, feed.getId().value.c_str(), -1, SQLITE_TRANSIENT);
     if (result != SQLITE_OK) {
         sqlite3_finalize(stmt);
         throw std::runtime_error("Failed to bind feed update fields: " + std::string(sqlite3_errmsg(handle)));
@@ -196,18 +221,19 @@ core::Feed FeedRepository::updateFeed(const core::Feed& feed) {
     return feed;
 }
 
-void FeedRepository::deleteFeed(const core::FeedId& id) {
+void FeedRepository::deleteFeed(const core::ProjectId& projectId, const core::FeedId& id) {
     sqlite3* handle = connection_.getHandle();
     if (handle == nullptr) {
         throw std::runtime_error("SQLite connection is not open");
     }
-    const char* sql = "DELETE FROM feeds WHERE id=?;";
+    const char* sql = "DELETE FROM feeds WHERE project_id=? AND id=?;";
     sqlite3_stmt* stmt = nullptr;
     int result = sqlite3_prepare_v2(handle, sql, -1, &stmt, nullptr);
     if (result != SQLITE_OK) {
         throw std::runtime_error("Failed to prepare feed delete statement: " + std::string(sqlite3_errmsg(handle)));
     }
-    result = sqlite3_bind_text(stmt, 1, id.value.c_str(), -1, SQLITE_TRANSIENT);
+    result = sqlite3_bind_text(stmt, 1, projectId.value.c_str(), -1, SQLITE_TRANSIENT);
+    result |= sqlite3_bind_text(stmt, 2, id.value.c_str(), -1, SQLITE_TRANSIENT);
     if (result != SQLITE_OK) {
         sqlite3_finalize(stmt);
         throw std::runtime_error("Failed to bind feed id for delete: " + std::string(sqlite3_errmsg(handle)));

@@ -10,7 +10,10 @@ namespace projection::core {
 class Cue {
  public:
   Cue() = default;
-  Cue(CueId id, std::string name, SceneId sceneId);
+  Cue(ProjectId projectId, CueId id, std::string name, SceneId sceneId);
+
+  const ProjectId& getProjectId() const { return projectId_; }
+  void setProjectId(const ProjectId& projectId) { projectId_ = projectId; }
 
   const CueId& getId() const { return id_; }
   void setId(const CueId& id) { id_ = id; }
@@ -28,6 +31,7 @@ class Cue {
   std::map<SurfaceId, float>& getSurfaceBrightnesses() { return surfaceBrightnesses_; }
 
  private:
+  ProjectId projectId_{};
   CueId id_{};
   std::string name_{};
   SceneId sceneId_{};

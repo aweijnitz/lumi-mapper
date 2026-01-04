@@ -47,10 +47,11 @@ The repo is structured as a C++-oriented monorepo with four main components:
      - Persist state in an **embedded SQLite3** database file (default path: `./data/db/projection.db`).
      - Manage asset metadata (files are stored on the host filesystem).
      - Expose a **remote API** over TCP/IP to clients.
+     - Optionally serve the Composer SPA from a static web root when `--web-root` is provided (same-origin with the API).
      - Coordinate with the **Renderer** process to apply changes & control playback.
      - Listen for renderer connections and keep an in-memory registry of connected renderers by unique name.
    - The **server machine is physically connected to the projector** (via the Renderer).
-   - The server exposes a **HTTP+JSON** API with `/feeds`, `/scenes`, `/cues`, `/projects`, `/renderer/*`, and `/demo/*` endpoints.
+   - The server exposes a **HTTP+JSON** API with `/api/projects`, project-scoped endpoints like `/api/projects/{projectId}/feeds|scenes|cues`, renderer control under `/api/projects/{projectId}/renderer/*`, plus `/api/renderer/*` and `/api/demo/*`.
    - Persistence is handled through the DB module (e.g., `db::SqliteConnection`, `db::SchemaMigrations`) and repository layer.
    - HTTP transport is implemented with the vendored single-header **cpp-httplib** server (`server/third_party/httplib.h`) inside the `http::HttpServer` wrapper.
 
@@ -72,7 +73,7 @@ The repo is structured as a C++-oriented monorepo with four main components:
 ### 2.1 Data Flow Overview
 
 - **Clients → Server**
-  - CRUD operations on Scenes, Surfaces, Feeds, Cues.
+  - CRUD operations on Project-scoped Scenes, Surfaces, Feeds, Cues.
   - CRUD operations on Projects (ordered cues + project settings).
   - Playback control: `play`, `pause`, `gotoCue`, etc.
 
@@ -98,17 +99,21 @@ The repo is structured as a C++-oriented monorepo with four main components:
 
 > **Renderer protocol & inputs:**
 > - `LoadSceneDefinition` is a supported control message for sending a full Scene plus the referenced Feeds in one payload.
+> - Renderer control messages include project-scoped ids (e.g., `projectId` alongside scene/cue/feed ids).
 > - `Hello` payloads from renderers must include a unique `name` field; the server uses this to register each renderer.
 > - The renderer consumes MIDI via `ofxMidi` (e.g., CC #1 mapped to brightness) and audio input energy to modulate scale.
 
 ### 2.2 Project Model & API Surface
 - **Project fields:** `id`, `name`, `description`, ordered `cueOrder`, and `settings` (controllers map, MIDI channels, global config key/values).
-- **Persistence:** tables `projects` and `project_cues` (ordered positions) in SQLite.
-- **Validation:** project references must point to existing cues; MIDI channels limited to 1–16; controller names/targets must be non-empty.
+- **Scoped entities:** `Feed`, `Scene`, and `Cue` are all scoped by `projectId`; IDs are unique within a project.
+- **Persistence:** tables `projects`, `feeds`, `scenes`, `cues`, and `project_cues` are keyed by `project_id` in SQLite.
+- **Validation:** project references must point to existing cues in the same project; MIDI channels limited to 1–16; controller names/targets must be non-empty.
 - **HTTP API:** 
   - `GET /projects` list projects, `GET /projects/{id}` fetch one.
   - `POST /projects` create, `PUT /projects/{id}` update (id enforced from path), `DELETE /projects/{id}` remove.
-  - Cue deletion is blocked when the cue is referenced by any project.
+  - `GET/POST/PUT/DELETE /projects/{projectId}/feeds|scenes|cues` manage project-scoped entities (payloads include `projectId`).
+  - `POST /projects/{projectId}/renderer/loadScene` loads a scene from the specified project.
+  - Cue deletion is blocked when the cue is referenced by the same project.
 
 ---
 

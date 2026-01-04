@@ -29,6 +29,13 @@ void SqliteConnection::open(const std::string& path) {
     }
 
     handle_ = db_handle;
+
+    char* errorMessage = nullptr;
+    if (sqlite3_exec(handle_, "PRAGMA foreign_keys = ON;", nullptr, nullptr, &errorMessage) != SQLITE_OK) {
+        std::string error = errorMessage ? errorMessage : "Unknown error";
+        sqlite3_free(errorMessage);
+        throw std::runtime_error("Failed to enable SQLite foreign keys: " + error);
+    }
 }
 
 sqlite3* SqliteConnection::getHandle() const { return handle_; }

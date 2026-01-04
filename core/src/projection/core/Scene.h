@@ -12,7 +12,10 @@ namespace projection::core {
 class Scene {
  public:
   Scene() = default;
-  Scene(SceneId id, std::string name, std::string description, std::vector<Surface> surfaces);
+  Scene(ProjectId projectId, SceneId id, std::string name, std::string description, std::vector<Surface> surfaces);
+
+  const ProjectId& getProjectId() const { return projectId_; }
+  void setProjectId(const ProjectId& projectId) { projectId_ = projectId; }
 
   const SceneId& getId() const { return id_; }
   void setId(const SceneId& id) { id_ = id; }
@@ -33,11 +36,12 @@ class Scene {
   bool isConsistent(const std::vector<Feed>& feeds) const;
 
   bool operator==(const Scene& other) const {
-    return id_ == other.id_ && name_ == other.name_ && description_ == other.description_ &&
-           surfaces_ == other.surfaces_;
+    return projectId_ == other.projectId_ && id_ == other.id_ && name_ == other.name_ &&
+           description_ == other.description_ && surfaces_ == other.surfaces_;
   }
 
  private:
+  ProjectId projectId_{};
   SceneId id_{};
   std::string name_{};
   std::string description_{};

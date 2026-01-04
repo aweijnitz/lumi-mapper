@@ -41,7 +41,7 @@ void expectRuntimeError(const std::function<void()>& fn) {
 }  // namespace
 
 TEST_CASE("Feed round-trip serialization", "[serialization]") {
-  Feed feed{FeedId{"feed-1"}, "Camera Feed", FeedType::Camera, "{\"device\":0}"};
+  Feed feed{ProjectId{"project-1"}, FeedId{"feed-1"}, "Camera Feed", FeedType::Camera, "{\"device\":0}"};
 
   json j = feed;
   Feed parsed = j.get<Feed>();
@@ -78,7 +78,7 @@ TEST_CASE("Scene round-trip serialization", "[serialization]") {
   std::vector<Vec2> verts{{0.f, 0.f}, {2.f, 0.f}, {2.f, 2.f}, {0.f, 2.f}};
   Surface surfaceA{SurfaceId{"sA"}, "Left", verts, FeedId{"feedA"}, 1.0f, 1.0f, BlendMode::Normal, 0};
   Surface surfaceB{SurfaceId{"sB"}, "Right", verts, FeedId{"feedB"}, 0.7f, 0.8f, BlendMode::Additive, 1};
-  Scene scene{SceneId{"scene-123"}, "Main Scene", "Two quads", {surfaceA, surfaceB}};
+  Scene scene{ProjectId{"project-1"}, SceneId{"scene-123"}, "Main Scene", "Two quads", {surfaceA, surfaceB}};
 
   json j = scene;
   Scene parsed = j.get<Scene>();
@@ -90,7 +90,7 @@ TEST_CASE("Scene round-trip serialization", "[serialization]") {
 }
 
 TEST_CASE("Cue round-trip serialization", "[serialization]") {
-  Cue cue{CueId{"cue-1"}, "Intro", SceneId{"scene-123"}};
+  Cue cue{ProjectId{"project-1"}, CueId{"cue-1"}, "Intro", SceneId{"scene-123"}};
   cue.getSurfaceOpacities()[SurfaceId{"sA"}] = 0.5f;
   cue.getSurfaceBrightnesses()[SurfaceId{"sA"}] = 0.7f;
   cue.getSurfaceOpacities()[SurfaceId{"sB"}] = 1.0f;
@@ -140,6 +140,7 @@ TEST_CASE("Project round-trip serialization", "[serialization]") {
 
 TEST_CASE("Feed configJson accepts string or object", "[serialization]") {
   json feedWithString = {
+      {"projectId", "project-1"},
       {"id", "feed-1"},
       {"name", "Clip"},
       {"type", "VideoFile"},
@@ -149,6 +150,7 @@ TEST_CASE("Feed configJson accepts string or object", "[serialization]") {
   REQUIRE(parsedString.getConfigJson() == "{\"filePath\":\"data/assets/clipA.mp4\"}");
 
   json feedWithObject = {
+      {"projectId", "project-1"},
       {"id", "feed-2"},
       {"name", "Clip"},
       {"type", "VideoFile"},
@@ -159,7 +161,8 @@ TEST_CASE("Feed configJson accepts string or object", "[serialization]") {
 }
 
 TEST_CASE("Invalid enum strings throw", "[serialization][negative]") {
-  json invalidFeed = {{"id", "feed-1"},
+  json invalidFeed = {{"projectId", "project-1"},
+                      {"id", "feed-1"},
                       {"name", "Invalid"},
                       {"type", "NotAType"},
                       {"configJson", "{}"}};
@@ -177,7 +180,7 @@ TEST_CASE("Invalid enum strings throw", "[serialization][negative]") {
 }
 
 TEST_CASE("Missing required fields throw", "[serialization][negative]") {
-  json missingId = {{"name", "No Id"}, {"type", "VideoFile"}, {"configJson", "{}"}};
+  json missingId = {{"projectId", "project-1"}, {"name", "No Id"}, {"type", "VideoFile"}, {"configJson", "{}"}};
   expectRuntimeError([&]() { missingId.get<Feed>(); });
 
   json missingVertices = {{"id", "s1"},
@@ -191,7 +194,8 @@ TEST_CASE("Missing required fields throw", "[serialization][negative]") {
 }
 
 TEST_CASE("Type mismatches throw", "[serialization][negative]") {
-  json wrongType = {{"id", 123},
+  json wrongType = {{"projectId", "project-1"},
+                    {"id", 123},
                     {"name", "Bad"},
                     {"type", "VideoFile"},
                     {"configJson", "{}"}};

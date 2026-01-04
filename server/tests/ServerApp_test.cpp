@@ -38,7 +38,7 @@ int reservePort() {
 }  // namespace
 
 TEST_CASE("ServerApp constructs with configuration", "[server][app]") {
-    ServerConfig config{tempDbPath("server_app_construct.db"), 8080, 5555};
+    ServerConfig config{tempDbPath("server_app_construct.db"), "", 8080, 5555};
     bool threw = false;
     try {
         ServerApp app{config};
@@ -53,7 +53,7 @@ TEST_CASE("ServerApp constructs with configuration", "[server][app]") {
 TEST_CASE("ServerApp run returns status code", "[server][app]") {
     int httpPort = reservePort();
     int rendererPort = reservePort();
-    ServerConfig config{tempDbPath("server_app_run.db"), httpPort, rendererPort};
+    ServerConfig config{tempDbPath("server_app_run.db"), "", httpPort, rendererPort};
     ServerApp app{config};
 
     int status = -1;

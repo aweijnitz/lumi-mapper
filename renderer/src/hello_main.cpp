@@ -1,12 +1,41 @@
 #include <ofMain.h>
 
+#include <atomic>
 #include <chrono>
 #include <csignal>
+#include <cstdlib>
 #include <iostream>
 #include <string>
 #include <thread>
 
+#include "util/ShutdownUtils.h"
+
 namespace {
+std::atomic<bool> shutdownRequested{false};
+
+void safeSignalHandler(int signum) {
+  if (shutdownRequested.exchange(true)) {
+    return;
+  }
+  std::signal(SIGTERM, SIG_DFL);
+  std::signal(SIGQUIT, SIG_DFL);
+  std::signal(SIGINT, SIG_DFL);
+  std::signal(SIGHUP, SIG_DFL);
+  std::signal(SIGABRT, SIG_DFL);
+
+  std::cerr << "[hello_app] signal " << signum << " received; requesting shutdown" << std::endl;
+  if (!projection::renderer::requestWindowClose(ofGetWindowPtr(), std::cerr, "hello_app")) {
+    std::_Exit(signum);
+  }
+}
+
+void installSignalHandlers() {
+  std::signal(SIGTERM, &safeSignalHandler);
+  std::signal(SIGQUIT, &safeSignalHandler);
+  std::signal(SIGINT, &safeSignalHandler);
+  std::signal(SIGHUP, &safeSignalHandler);
+  std::signal(SIGABRT, &safeSignalHandler);
+}
 
 struct Args {
   std::string message{"Hello world"};
@@ -82,5 +111,10 @@ int main(int argc, char* argv[]) {
     std::cerr << "[hello_app] verbose mode on" << std::endl;
   }
   ofSetupOpenGL(640, 480, OF_WINDOW);
+  if (!projection::renderer::isWindowAvailable(ofGetWindowPtr(), std::cerr, "hello_app")) {
+    std::cerr << "[hello_app] OpenGL initialization failed; window was not created" << std::endl;
+    return 1;
+  }
+  installSignalHandlers();
   return ofRunApp(new HelloApp(args.message, args.verbose, args.quitAfterSeconds));
 }

@@ -5,8 +5,9 @@
 
 namespace projection::core {
 
-Scene::Scene(SceneId id, std::string name, std::string description, std::vector<Surface> surfaces)
-    : id_(std::move(id)),
+Scene::Scene(ProjectId projectId, SceneId id, std::string name, std::string description, std::vector<Surface> surfaces)
+    : projectId_(std::move(projectId)),
+      id_(std::move(id)),
       name_(std::move(name)),
       description_(std::move(description)),
       surfaces_(std::move(surfaces)) {}
@@ -37,7 +38,7 @@ bool Scene::isConsistent(const std::vector<Feed>& feeds) const {
 
     const auto& feedId = surface.getFeedId();
     auto feedIt = std::find_if(feeds.begin(), feeds.end(), [&](const Feed& feed) {
-      return feed.getId() == feedId;
+      return feed.getId() == feedId && feed.getProjectId() == projectId_;
     });
     if (feedIt == feeds.end()) {
       return false;

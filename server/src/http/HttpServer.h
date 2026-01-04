@@ -15,7 +15,8 @@ class HttpServer {
 public:
     HttpServer(repo::FeedRepository& feedRepository, repo::SceneRepository& sceneRepository,
                repo::CueRepository& cueRepository, repo::ProjectRepository& projectRepository,
-               std::shared_ptr<renderer::RendererRegistry> rendererRegistry = nullptr, bool verbose = false);
+               std::shared_ptr<renderer::RendererRegistry> rendererRegistry = nullptr, bool verbose = false,
+               std::string webRoot = "");
 
     // Starts listening on the provided port. This call blocks until stop() is invoked
     // from another thread.
@@ -28,6 +29,7 @@ public:
 
 private:
     void registerRoutes();
+    void registerStaticRoutes();
     void respondWithError(::httplib::Response& res, int status, const std::string& message);
     bool collectFeedsForScene(const core::Scene& scene, std::vector<core::Feed>& feeds, std::string& error);
 
@@ -40,6 +42,7 @@ private:
     std::shared_ptr<renderer::RendererRegistry> rendererRegistry_;
     std::unique_ptr<::httplib::Server> server_;
     bool verbose_{false};
+    std::string webRoot_;
 };
 
 }  // namespace projection::server::http

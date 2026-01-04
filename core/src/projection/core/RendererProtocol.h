@@ -62,9 +62,12 @@ struct ErrorMessage {
 };
 
 struct LoadSceneMessage {
+  ProjectId projectId;
   SceneId sceneId;
 
-  bool operator==(const LoadSceneMessage& other) const { return sceneId == other.sceneId; }
+  bool operator==(const LoadSceneMessage& other) const {
+    return projectId == other.projectId && sceneId == other.sceneId;
+  }
 };
 
 struct LoadSceneDefinitionMessage {
@@ -77,18 +80,20 @@ struct LoadSceneDefinitionMessage {
 };
 
 struct SetFeedForSurfaceMessage {
+  ProjectId projectId;
   SurfaceId surfaceId;
   FeedId feedId;
 
   bool operator==(const SetFeedForSurfaceMessage& other) const {
-    return surfaceId == other.surfaceId && feedId == other.feedId;
+    return projectId == other.projectId && surfaceId == other.surfaceId && feedId == other.feedId;
   }
 };
 
 struct PlayCueMessage {
+  ProjectId projectId;
   CueId cueId;
 
-  bool operator==(const PlayCueMessage& other) const { return cueId == other.cueId; }
+  bool operator==(const PlayCueMessage& other) const { return projectId == other.projectId && cueId == other.cueId; }
 };
 
 struct RendererMessage {

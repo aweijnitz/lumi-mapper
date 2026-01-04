@@ -16,26 +16,42 @@ CREATE TABLE IF NOT EXISTS schema_version (
 );
 )SQL";
 
-const char* kCreateFeedsTable = R"SQL(
-CREATE TABLE IF NOT EXISTS feeds (
+const char* kCreateProjectsTable = R"SQL(
+CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
+    description TEXT,
+    settings_json TEXT NOT NULL
+);
+)SQL";
+
+const char* kCreateFeedsTable = R"SQL(
+CREATE TABLE IF NOT EXISTS feeds (
+    project_id TEXT NOT NULL,
+    id TEXT NOT NULL,
+    name TEXT NOT NULL,
     type TEXT NOT NULL,
-    config_json TEXT NOT NULL
+    config_json TEXT NOT NULL,
+    PRIMARY KEY(project_id, id),
+    FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
 )SQL";
 
 const char* kCreateScenesTable = R"SQL(
 CREATE TABLE IF NOT EXISTS scenes (
-    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    id TEXT NOT NULL,
     name TEXT NOT NULL,
-    description TEXT
+    description TEXT,
+    PRIMARY KEY(project_id, id),
+    FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
 )SQL";
 
 const char* kCreateSurfacesTable = R"SQL(
 CREATE TABLE IF NOT EXISTS surfaces (
-    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    id TEXT NOT NULL,
     scene_id TEXT NOT NULL,
     name TEXT NOT NULL,
     feed_id TEXT NOT NULL,
@@ -44,27 +60,23 @@ CREATE TABLE IF NOT EXISTS surfaces (
     brightness REAL NOT NULL,
     blend_mode TEXT NOT NULL,
     vertices_json TEXT NOT NULL,
-    FOREIGN KEY(scene_id) REFERENCES scenes(id)
+    PRIMARY KEY(project_id, id),
+    FOREIGN KEY(project_id, scene_id) REFERENCES scenes(project_id, id) ON DELETE CASCADE,
+    FOREIGN KEY(project_id, feed_id) REFERENCES feeds(project_id, id)
 );
 )SQL";
 
 const char* kCreateCuesTable = R"SQL(
 CREATE TABLE IF NOT EXISTS cues (
-    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    id TEXT NOT NULL,
     name TEXT NOT NULL,
     scene_id TEXT NOT NULL,
     surface_opacities_json TEXT NOT NULL,
     surface_brightnesses_json TEXT NOT NULL,
-    FOREIGN KEY(scene_id) REFERENCES scenes(id)
-);
-)SQL";
-
-const char* kCreateProjectsTable = R"SQL(
-CREATE TABLE IF NOT EXISTS projects (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    description TEXT,
-    settings_json TEXT NOT NULL
+    PRIMARY KEY(project_id, id),
+    FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    FOREIGN KEY(project_id, scene_id) REFERENCES scenes(project_id, id)
 );
 )SQL";
 
@@ -75,7 +87,8 @@ CREATE TABLE IF NOT EXISTS project_cues (
     position INTEGER NOT NULL,
     PRIMARY KEY(project_id, position),
     FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
-    FOREIGN KEY(cue_id) REFERENCES cues(id)
+    FOREIGN KEY(project_id, cue_id) REFERENCES cues(project_id, id),
+    UNIQUE(project_id, cue_id)
 );
 )SQL";
 
@@ -91,7 +104,14 @@ void ensureSchemaVersionTable(sqlite3* handle) {
 
 void createTables(sqlite3* handle) {
     char* errorMessage = nullptr;
-    int result = sqlite3_exec(handle, kCreateFeedsTable, nullptr, nullptr, &errorMessage);
+    int result = sqlite3_exec(handle, kCreateProjectsTable, nullptr, nullptr, &errorMessage);
+    if (result != SQLITE_OK) {
+        std::string error = errorMessage ? errorMessage : "Unknown error";
+        sqlite3_free(errorMessage);
+        throw std::runtime_error("Failed to create projects table: " + error);
+    }
+
+    result = sqlite3_exec(handle, kCreateFeedsTable, nullptr, nullptr, &errorMessage);
     if (result != SQLITE_OK) {
         std::string error = errorMessage ? errorMessage : "Unknown error";
         sqlite3_free(errorMessage);
@@ -117,13 +137,6 @@ void createTables(sqlite3* handle) {
         std::string error = errorMessage ? errorMessage : "Unknown error";
         sqlite3_free(errorMessage);
         throw std::runtime_error("Failed to create cues table: " + error);
-    }
-
-    result = sqlite3_exec(handle, kCreateProjectsTable, nullptr, nullptr, &errorMessage);
-    if (result != SQLITE_OK) {
-        std::string error = errorMessage ? errorMessage : "Unknown error";
-        sqlite3_free(errorMessage);
-        throw std::runtime_error("Failed to create projects table: " + error);
     }
 
     result = sqlite3_exec(handle, kCreateProjectCuesTable, nullptr, nullptr, &errorMessage);

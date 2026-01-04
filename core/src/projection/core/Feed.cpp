@@ -6,8 +6,9 @@
 
 namespace projection::core {
 
-Feed::Feed(FeedId id, std::string name, FeedType type, std::string configJson)
-    : id_(std::move(id)),
+Feed::Feed(ProjectId projectId, FeedId id, std::string name, FeedType type, std::string configJson)
+    : projectId_(std::move(projectId)),
+      id_(std::move(id)),
       name_(std::move(name)),
       type_(type),
       configJson_(std::move(configJson)) {}
@@ -25,9 +26,10 @@ VideoFileConfig parseVideoFileConfig(const Feed& feed) {
   return VideoFileConfig{json["filePath"].get<std::string>()};
 }
 
-Feed makeVideoFileFeed(const FeedId& id, const std::string& name, const std::string& filePath) {
+Feed makeVideoFileFeed(const ProjectId& projectId, const FeedId& id, const std::string& name,
+                       const std::string& filePath) {
   nlohmann::json config{{"filePath", filePath}};
-  return Feed(id, name, FeedType::VideoFile, config.dump());
+  return Feed(projectId, id, name, FeedType::VideoFile, config.dump());
 }
 
 }  // namespace projection::core

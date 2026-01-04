@@ -12,10 +12,11 @@ class SurfaceRepository {
 public:
     explicit SurfaceRepository(db::SqliteConnection& connection);
 
-    core::Surface createSurface(const core::Surface& surface, const core::SceneId& sceneId);
+    core::Surface createSurface(const core::Surface& surface, const core::ProjectId& projectId,
+                                const core::SceneId& sceneId);
 
-    std::vector<core::Surface> listSurfacesForScene(const core::SceneId& sceneId);
-    void deleteSurfacesForScene(const core::SceneId& sceneId);
+    std::vector<core::Surface> listSurfacesForScene(const core::ProjectId& projectId, const core::SceneId& sceneId);
+    void deleteSurfacesForScene(const core::ProjectId& projectId, const core::SceneId& sceneId);
 
 private:
     db::SqliteConnection& connection_;

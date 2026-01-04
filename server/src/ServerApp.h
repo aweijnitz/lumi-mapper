@@ -28,6 +28,7 @@ namespace projection::server {
 
 struct ServerConfig {
     std::string databasePath;
+    std::string webRoot;
     int httpPort;
     int rendererPort;
     bool verbose{false};

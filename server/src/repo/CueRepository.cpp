@@ -27,23 +27,28 @@ core::Cue CueRepository::createCue(const core::Cue& cue) {
     if (cue.getId().value.empty()) {
         throw std::runtime_error("Cue id must not be empty");
     }
+    if (cue.getProjectId().value.empty()) {
+        throw std::runtime_error("Cue project id must not be empty");
+    }
 
     const nlohmann::json opacitiesJson = serializeSurfaceValues(cue.getSurfaceOpacities());
     const nlohmann::json brightnessJson = serializeSurfaceValues(cue.getSurfaceBrightnesses());
 
-    const char* sql = "INSERT INTO cues(id, name, scene_id, surface_opacities_json, surface_brightnesses_json) "
-                      "VALUES(?, ?, ?, ?, ?);";
+    const char* sql =
+        "INSERT INTO cues(project_id, id, name, scene_id, surface_opacities_json, surface_brightnesses_json) "
+        "VALUES(?, ?, ?, ?, ?, ?);";
     sqlite3_stmt* stmt = nullptr;
     int rc = sqlite3_prepare_v2(handle, sql, -1, &stmt, nullptr);
     if (rc != SQLITE_OK) {
         throw std::runtime_error("Failed to prepare cue insert: " + std::string(sqlite3_errmsg(handle)));
     }
 
-    rc = sqlite3_bind_text(stmt, 1, cue.getId().value.c_str(), -1, SQLITE_TRANSIENT);
-    rc |= sqlite3_bind_text(stmt, 2, cue.getName().c_str(), -1, SQLITE_TRANSIENT);
-    rc |= sqlite3_bind_text(stmt, 3, cue.getSceneId().value.c_str(), -1, SQLITE_TRANSIENT);
-    rc |= sqlite3_bind_text(stmt, 4, opacitiesJson.dump().c_str(), -1, SQLITE_TRANSIENT);
-    rc |= sqlite3_bind_text(stmt, 5, brightnessJson.dump().c_str(), -1, SQLITE_TRANSIENT);
+    rc = sqlite3_bind_text(stmt, 1, cue.getProjectId().value.c_str(), -1, SQLITE_TRANSIENT);
+    rc |= sqlite3_bind_text(stmt, 2, cue.getId().value.c_str(), -1, SQLITE_TRANSIENT);
+    rc |= sqlite3_bind_text(stmt, 3, cue.getName().c_str(), -1, SQLITE_TRANSIENT);
+    rc |= sqlite3_bind_text(stmt, 4, cue.getSceneId().value.c_str(), -1, SQLITE_TRANSIENT);
+    rc |= sqlite3_bind_text(stmt, 5, opacitiesJson.dump().c_str(), -1, SQLITE_TRANSIENT);
+    rc |= sqlite3_bind_text(stmt, 6, brightnessJson.dump().c_str(), -1, SQLITE_TRANSIENT);
     if (rc != SQLITE_OK) {
         sqlite3_finalize(stmt);
         throw std::runtime_error("Failed to bind cue fields: " + std::string(sqlite3_errmsg(handle)));
@@ -58,17 +63,24 @@ core::Cue CueRepository::createCue(const core::Cue& cue) {
     return cue;
 }
 
-std::vector<core::Cue> CueRepository::listCues() {
+std::vector<core::Cue> CueRepository::listCues(const core::ProjectId& projectId) {
     sqlite3* handle = connection_.getHandle();
     if (!handle) {
         throw std::runtime_error("SQLite connection is not open");
     }
-    const char* sql = "SELECT id, name, scene_id, surface_opacities_json, surface_brightnesses_json FROM cues;";
+    const char* sql =
+        "SELECT id, name, scene_id, surface_opacities_json, surface_brightnesses_json FROM cues WHERE project_id=?;";
     sqlite3_stmt* stmt = nullptr;
     int rc = sqlite3_prepare_v2(handle, sql, -1, &stmt, nullptr);
     if (rc != SQLITE_OK) {
         throw std::runtime_error("Failed to prepare cue select: " + std::string(sqlite3_errmsg(handle)));
     }
+    rc = sqlite3_bind_text(stmt, 1, projectId.value.c_str(), -1, SQLITE_TRANSIENT);
+    if (rc != SQLITE_OK) {
+        sqlite3_finalize(stmt);
+        throw std::runtime_error("Failed to bind cue project id: " + std::string(sqlite3_errmsg(handle)));
+    }
+
     std::vector<core::Cue> cues;
     while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
         const unsigned char* idText = sqlite3_column_text(stmt, 0);
@@ -77,7 +89,7 @@ std::vector<core::Cue> CueRepository::listCues() {
         const unsigned char* opacitiesText = sqlite3_column_text(stmt, 3);
         const unsigned char* brightnessText = sqlite3_column_text(stmt, 4);
 
-        core::Cue cue(core::CueId{idText ? reinterpret_cast<const char*>(idText) : ""},
+        core::Cue cue(projectId, core::CueId{idText ? reinterpret_cast<const char*>(idText) : ""},
                       nameText ? reinterpret_cast<const char*>(nameText) : "",
                       core::SceneId{sceneText ? reinterpret_cast<const char*>(sceneText) : ""});
 
@@ -104,18 +116,25 @@ std::vector<core::Cue> CueRepository::listCues() {
     return cues;
 }
 
-std::optional<core::Cue> CueRepository::findCueById(const core::CueId& id) {
+std::optional<core::Cue> CueRepository::findCueById(const core::ProjectId& projectId, const core::CueId& id) {
     sqlite3* handle = connection_.getHandle();
     if (!handle) {
         throw std::runtime_error("SQLite connection is not open");
     }
-    const char* sql = "SELECT id, name, scene_id, surface_opacities_json, surface_brightnesses_json FROM cues WHERE id=?;";
+    const char* sql =
+        "SELECT id, name, scene_id, surface_opacities_json, surface_brightnesses_json FROM cues WHERE project_id=? "
+        "AND id=?;";
     sqlite3_stmt* stmt = nullptr;
     int rc = sqlite3_prepare_v2(handle, sql, -1, &stmt, nullptr);
     if (rc != SQLITE_OK) {
         throw std::runtime_error("Failed to prepare cue select: " + std::string(sqlite3_errmsg(handle)));
     }
-    rc = sqlite3_bind_text(stmt, 1, id.value.c_str(), -1, SQLITE_TRANSIENT);
+    rc = sqlite3_bind_text(stmt, 1, projectId.value.c_str(), -1, SQLITE_TRANSIENT);
+    if (rc != SQLITE_OK) {
+        sqlite3_finalize(stmt);
+        throw std::runtime_error("Failed to bind cue project id: " + std::string(sqlite3_errmsg(handle)));
+    }
+    rc = sqlite3_bind_text(stmt, 2, id.value.c_str(), -1, SQLITE_TRANSIENT);
     if (rc != SQLITE_OK) {
         sqlite3_finalize(stmt);
         throw std::runtime_error("Failed to bind cue id: " + std::string(sqlite3_errmsg(handle)));
@@ -128,7 +147,7 @@ std::optional<core::Cue> CueRepository::findCueById(const core::CueId& id) {
         const unsigned char* opacitiesText = sqlite3_column_text(stmt, 3);
         const unsigned char* brightnessText = sqlite3_column_text(stmt, 4);
 
-        core::Cue cue(core::CueId{idText ? reinterpret_cast<const char*>(idText) : ""},
+        core::Cue cue(projectId, core::CueId{idText ? reinterpret_cast<const char*>(idText) : ""},
                       nameText ? reinterpret_cast<const char*>(nameText) : "",
                       core::SceneId{sceneText ? reinterpret_cast<const char*>(sceneText) : ""});
         cue.getSurfaceOpacities().clear();
@@ -156,8 +175,12 @@ core::Cue CueRepository::updateCue(const core::Cue& cue) {
     if (!handle) {
         throw std::runtime_error("SQLite connection is not open");
     }
-    const char* sql = "UPDATE cues SET name=?, scene_id=?, surface_opacities_json=?, surface_brightnesses_json=? "
-                      "WHERE id=?;";
+    if (cue.getProjectId().value.empty()) {
+        throw std::runtime_error("Cue project id must not be empty");
+    }
+    const char* sql =
+        "UPDATE cues SET name=?, scene_id=?, surface_opacities_json=?, surface_brightnesses_json=? "
+        "WHERE project_id=? AND id=?;";
     sqlite3_stmt* stmt = nullptr;
     int rc = sqlite3_prepare_v2(handle, sql, -1, &stmt, nullptr);
     if (rc != SQLITE_OK) {
@@ -171,7 +194,8 @@ core::Cue CueRepository::updateCue(const core::Cue& cue) {
     rc |= sqlite3_bind_text(stmt, 2, cue.getSceneId().value.c_str(), -1, SQLITE_TRANSIENT);
     rc |= sqlite3_bind_text(stmt, 3, opacitiesJson.dump().c_str(), -1, SQLITE_TRANSIENT);
     rc |= sqlite3_bind_text(stmt, 4, brightnessJson.dump().c_str(), -1, SQLITE_TRANSIENT);
-    rc |= sqlite3_bind_text(stmt, 5, cue.getId().value.c_str(), -1, SQLITE_TRANSIENT);
+    rc |= sqlite3_bind_text(stmt, 5, cue.getProjectId().value.c_str(), -1, SQLITE_TRANSIENT);
+    rc |= sqlite3_bind_text(stmt, 6, cue.getId().value.c_str(), -1, SQLITE_TRANSIENT);
     if (rc != SQLITE_OK) {
         sqlite3_finalize(stmt);
         throw std::runtime_error("Failed to bind cue update fields: " + std::string(sqlite3_errmsg(handle)));
@@ -185,18 +209,19 @@ core::Cue CueRepository::updateCue(const core::Cue& cue) {
     return cue;
 }
 
-void CueRepository::deleteCue(const core::CueId& id) {
+void CueRepository::deleteCue(const core::ProjectId& projectId, const core::CueId& id) {
     sqlite3* handle = connection_.getHandle();
     if (!handle) {
         throw std::runtime_error("SQLite connection is not open");
     }
-    const char* sql = "DELETE FROM cues WHERE id=?;";
+    const char* sql = "DELETE FROM cues WHERE project_id=? AND id=?;";
     sqlite3_stmt* stmt = nullptr;
     int rc = sqlite3_prepare_v2(handle, sql, -1, &stmt, nullptr);
     if (rc != SQLITE_OK) {
         throw std::runtime_error("Failed to prepare cue delete: " + std::string(sqlite3_errmsg(handle)));
     }
-    rc = sqlite3_bind_text(stmt, 1, id.value.c_str(), -1, SQLITE_TRANSIENT);
+    rc = sqlite3_bind_text(stmt, 1, projectId.value.c_str(), -1, SQLITE_TRANSIENT);
+    rc |= sqlite3_bind_text(stmt, 2, id.value.c_str(), -1, SQLITE_TRANSIENT);
     if (rc != SQLITE_OK) {
         sqlite3_finalize(stmt);
         throw std::runtime_error("Failed to bind cue id: " + std::string(sqlite3_errmsg(handle)));

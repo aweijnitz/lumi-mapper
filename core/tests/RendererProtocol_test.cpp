@@ -42,7 +42,7 @@ TEST_CASE("RendererProtocol round trip scene and feed commands", "[RendererProto
   RendererMessage loadSceneMessage{};
   loadSceneMessage.type = RendererMessageType::LoadScene;
   loadSceneMessage.commandId = "cmd-load";
-  loadSceneMessage.loadScene = LoadSceneMessage{SceneId{"scene-123"}};
+  loadSceneMessage.loadScene = LoadSceneMessage{ProjectId{"project-1"}, SceneId{"scene-123"}};
 
   json loadSceneJson = loadSceneMessage;
   auto parsedLoadScene = loadSceneJson.get<RendererMessage>();
@@ -51,7 +51,8 @@ TEST_CASE("RendererProtocol round trip scene and feed commands", "[RendererProto
   RendererMessage setFeedMessage{};
   setFeedMessage.type = RendererMessageType::SetFeedForSurface;
   setFeedMessage.commandId = "cmd-set-feed";
-  setFeedMessage.setFeedForSurface = SetFeedForSurfaceMessage{SurfaceId{"surface-1"}, FeedId{"feed-9"}};
+  setFeedMessage.setFeedForSurface =
+      SetFeedForSurfaceMessage{ProjectId{"project-1"}, SurfaceId{"surface-1"}, FeedId{"feed-9"}};
 
   json setFeedJson = setFeedMessage;
   auto parsedSetFeed = setFeedJson.get<RendererMessage>();
@@ -60,7 +61,7 @@ TEST_CASE("RendererProtocol round trip scene and feed commands", "[RendererProto
   RendererMessage playCueMessage{};
   playCueMessage.type = RendererMessageType::PlayCue;
   playCueMessage.commandId = "cmd-play";
-  playCueMessage.playCue = PlayCueMessage{CueId{"cue-5"}};
+  playCueMessage.playCue = PlayCueMessage{ProjectId{"project-1"}, CueId{"cue-5"}};
 
   json playCueJson = playCueMessage;
   auto parsedPlayCue = playCueJson.get<RendererMessage>();

@@ -12,6 +12,7 @@
 using projection::core::Feed;
 using projection::core::FeedId;
 using projection::core::FeedType;
+using projection::core::ProjectId;
 using projection::core::Scene;
 using projection::core::SceneId;
 using projection::core::Surface;
@@ -21,10 +22,11 @@ using projection::renderer::RenderState;
 using projection::renderer::mapVideoFeedFilePaths;
 
 TEST_CASE("mapVideoFeedFilePaths returns mappings for video feeds", "[renderer][renderstate]") {
-  Scene scene{SceneId{"scene-1"}, "Test Scene", "desc", {}};
+  Scene scene{ProjectId{"project-1"}, SceneId{"scene-1"}, "Test Scene", "desc", {}};
   std::vector<Feed> feeds{
-      projection::core::makeVideoFileFeed(FeedId{"video1"}, "Video 1", "/media/video1.mp4"),
-      Feed{FeedId{"generated"}, "Generated", FeedType::Generated, "{}"}};
+      projection::core::makeVideoFileFeed(ProjectId{"project-1"}, FeedId{"video1"}, "Video 1",
+                                          "/media/video1.mp4"),
+      Feed{ProjectId{"project-1"}, FeedId{"generated"}, "Generated", FeedType::Generated, "{}"}};
 
   auto mapping = mapVideoFeedFilePaths(scene, feeds);
 
@@ -34,9 +36,9 @@ TEST_CASE("mapVideoFeedFilePaths returns mappings for video feeds", "[renderer][
 }
 
 TEST_CASE("mapVideoFeedFilePaths throws when config is invalid", "[renderer][renderstate][error]") {
-  Scene scene{SceneId{"scene-2"}, "Scene", "desc", {}};
+  Scene scene{ProjectId{"project-1"}, SceneId{"scene-2"}, "Scene", "desc", {}};
   std::vector<Feed> feeds{
-      Feed{FeedId{"video2"}, "Video 2", FeedType::VideoFile, "{}"}};
+      Feed{ProjectId{"project-1"}, FeedId{"video2"}, "Video 2", FeedType::VideoFile, "{}"}};
 
   bool threw = false;
   try {
@@ -50,10 +52,11 @@ TEST_CASE("mapVideoFeedFilePaths throws when config is invalid", "[renderer][ren
 TEST_CASE("loadSceneDefinition stores scene, feeds, and video resources", "[renderer][renderstate]") {
   Surface surface{SurfaceId{"surface-1"}, "Surface", {Vec2{0, 0}, Vec2{100, 0}, Vec2{100, 100}, Vec2{0, 100}},
                   FeedId{"video1"}};
-  Scene scene{SceneId{"scene-3"}, "Scene 3", "desc", {surface}};
+  Scene scene{ProjectId{"project-1"}, SceneId{"scene-3"}, "Scene 3", "desc", {surface}};
   std::vector<Feed> feeds{
-      projection::core::makeVideoFileFeed(FeedId{"video1"}, "Video 1", "/media/video1.mp4"),
-      Feed{FeedId{"camera1"}, "Camera", FeedType::Camera, "{}"}};
+      projection::core::makeVideoFileFeed(ProjectId{"project-1"}, FeedId{"video1"}, "Video 1",
+                                          "/media/video1.mp4"),
+      Feed{ProjectId{"project-1"}, FeedId{"camera1"}, "Camera", FeedType::Camera, "{}"}};
 
   RenderState state;
   state.loadSceneDefinition(scene, feeds);

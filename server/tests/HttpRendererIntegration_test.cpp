@@ -2,6 +2,7 @@
 #include "db/SqliteConnection.h"
 #include "http/HttpServer.h"
 #include "projection/core/RendererProtocol.h"
+#include "projection/core/Project.h"
 #include "renderer/RendererRegistry.h"
 #include "repo/FeedRepository.h"
 #include "repo/ProjectRepository.h"
@@ -218,7 +219,7 @@ struct RendererHttpContext {
 bool waitForServer(httplib::Client& client, http::HttpServer& server) {
     for (int attempt = 0; attempt < 100; ++attempt) {
         if (server.isRunning()) {
-            if (auto res = client.Get("/feeds")) {
+            if (auto res = client.Get("/api/projects")) {
                 (void)res;
                 return true;
             }
@@ -256,7 +257,7 @@ TEST_CASE("Renderer ping endpoint talks to renderer", "[http][renderer]") {
     auto httpClient = makeClient(httpPort);
     REQUIRE(waitForServer(*httpClient, ctx.httpServer));
 
-    auto res = httpClient->Post("/renderer/ping", "{}", "application/json");
+    auto res = httpClient->Post("/api/renderer/ping", "{}", "application/json");
     REQUIRE(res != nullptr);
     REQUIRE(res->status == 200);
     auto payload = nlohmann::json::parse(res->body);
@@ -279,8 +280,11 @@ TEST_CASE("LoadScene endpoint validates and forwards to renderer", "[http][rende
     const auto dbPath = tempDbPath("renderer_load_scene.db");
     RendererHttpContext ctx(dbPath, registry);
 
-    core::Feed feedA(core::FeedId{}, "Feed A", core::FeedType::VideoFile, R"({"filePath":"a.mp4"})");
-    core::Feed feedB(core::FeedId{}, "Feed B", core::FeedType::VideoFile, R"({"filePath":"b.mp4"})");
+    core::Project project(core::ProjectId{"project-1"}, "Project", "", {}, core::ProjectSettings{});
+    ctx.projectRepo.createProject(project);
+
+    core::Feed feedA(project.getId(), core::FeedId{}, "Feed A", core::FeedType::VideoFile, R"({"filePath":"a.mp4"})");
+    core::Feed feedB(project.getId(), core::FeedId{}, "Feed B", core::FeedType::VideoFile, R"({"filePath":"b.mp4"})");
     feedA = ctx.feedRepo.createFeed(feedA);
     feedB = ctx.feedRepo.createFeed(feedB);
 
@@ -288,7 +292,7 @@ TEST_CASE("LoadScene endpoint validates and forwards to renderer", "[http][rende
     std::vector<core::Surface> surfaces{
         core::Surface(core::SurfaceId{"integration-surface-1"}, "One", quad, feedA.getId()),
         core::Surface(core::SurfaceId{"integration-surface-2"}, "Two", quad, feedB.getId())};
-    core::Scene scene(core::SceneId{}, "Test", "Renderer scene", surfaces);
+    core::Scene scene(project.getId(), core::SceneId{}, "Test", "Renderer scene", surfaces);
     scene = ctx.sceneRepo.createScene(scene);
 
     ServerRunner runner(ctx.httpServer, httpPort);
@@ -296,7 +300,8 @@ TEST_CASE("LoadScene endpoint validates and forwards to renderer", "[http][rende
     REQUIRE(waitForServer(*httpClient, ctx.httpServer));
 
     nlohmann::json requestPayload{{"sceneId", scene.getId().value}};
-    auto res = httpClient->Post("/renderer/loadScene", requestPayload.dump(), "application/json");
+    auto res = httpClient->Post(("/api/projects/" + project.getId().value + "/renderer/loadScene").c_str(),
+                                requestPayload.dump(), "application/json");
     REQUIRE(res != nullptr);
     REQUIRE(res->status == 200);
     REQUIRE(fakeRenderer.waitForMessages(1));

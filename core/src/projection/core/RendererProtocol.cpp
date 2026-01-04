@@ -90,12 +90,15 @@ void from_json(const json& j, ErrorMessage& message) {
   message.message = requireString(j, "message");
 }
 
-void to_json(json& j, const LoadSceneMessage& message) { j = json{{"sceneId", message.sceneId.value}}; }
+void to_json(json& j, const LoadSceneMessage& message) {
+  j = json{{"projectId", message.projectId.value}, {"sceneId", message.sceneId.value}};
+}
 
 void from_json(const json& j, LoadSceneMessage& message) {
   if (!j.is_object()) {
     throw std::runtime_error("LoadScene payload must be an object");
   }
+  message.projectId = ProjectId(requireString(j, "projectId"));
   message.sceneId = SceneId(requireString(j, "sceneId"));
 }
 
@@ -127,23 +130,29 @@ void from_json(const json& j, LoadSceneDefinitionMessage& message) {
 }
 
 void to_json(json& j, const SetFeedForSurfaceMessage& message) {
-  j = json{{"surfaceId", message.surfaceId.value}, {"feedId", message.feedId.value}};
+  j = json{{"projectId", message.projectId.value},
+           {"surfaceId", message.surfaceId.value},
+           {"feedId", message.feedId.value}};
 }
 
 void from_json(const json& j, SetFeedForSurfaceMessage& message) {
   if (!j.is_object()) {
     throw std::runtime_error("SetFeedForSurface payload must be an object");
   }
+  message.projectId = ProjectId(requireString(j, "projectId"));
   message.surfaceId = SurfaceId(requireString(j, "surfaceId"));
   message.feedId = FeedId(requireString(j, "feedId"));
 }
 
-void to_json(json& j, const PlayCueMessage& message) { j = json{{"cueId", message.cueId.value}}; }
+void to_json(json& j, const PlayCueMessage& message) {
+  j = json{{"projectId", message.projectId.value}, {"cueId", message.cueId.value}};
+}
 
 void from_json(const json& j, PlayCueMessage& message) {
   if (!j.is_object()) {
     throw std::runtime_error("PlayCue payload must be an object");
   }
+  message.projectId = ProjectId(requireString(j, "projectId"));
   message.cueId = CueId(requireString(j, "cueId"));
 }
 

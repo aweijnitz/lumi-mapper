@@ -9,6 +9,7 @@ using projection::core::Feed;
 using projection::core::FeedId;
 using projection::core::FeedType;
 using projection::core::LoadSceneDefinitionMessage;
+using projection::core::ProjectId;
 using projection::core::RendererMessage;
 using projection::core::RendererMessageType;
 using projection::core::Scene;
@@ -22,12 +23,15 @@ Scene makeScene() {
   std::vector<Vec2> quad{{0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f}};
   Surface surfaceA{SurfaceId{"surface-a"}, "Left", quad, FeedId{"feed-a"}};
   Surface surfaceB{SurfaceId{"surface-b"}, "Right", quad, FeedId{"feed-b"}};
-  return Scene(SceneId{"scene-1"}, "Example Scene", "With two surfaces", {surfaceA, surfaceB});
+  return Scene(ProjectId{"project-1"}, SceneId{"scene-1"}, "Example Scene", "With two surfaces",
+               {surfaceA, surfaceB});
 }
 
 std::vector<Feed> makeFeeds() {
-  return {Feed(FeedId{"feed-a"}, "Feed A", FeedType::VideoFile, R"({"filePath":"a.mp4"})"),
-          Feed(FeedId{"feed-b"}, "Feed B", FeedType::VideoFile, R"({"filePath":"b.mp4"})")};
+  return {Feed(ProjectId{"project-1"}, FeedId{"feed-a"}, "Feed A", FeedType::VideoFile,
+               R"({"filePath":"a.mp4"})"),
+          Feed(ProjectId{"project-1"}, FeedId{"feed-b"}, "Feed B", FeedType::VideoFile,
+               R"({"filePath":"b.mp4"})")};
 }
 
 TEST_CASE("RendererProtocol round trip LoadSceneDefinition", "[RendererProtocol]") {

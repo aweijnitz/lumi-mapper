@@ -57,8 +57,8 @@ flowchart TB
 ```
 
 - **Main/Configuration**: Entry point parses CLI flags (DB path, HTTP port, renderer host/port) and wires dependencies.
-- **HTTP Layer**: Thin cpp-httplib wrapper (`http::HttpServer`) exposes routes for feeds, scenes, and renderer control; requests translate into domain operations.
-- **Repositories & DB Layer**: `db::SqliteConnection` plus schema migrations back repositories that CRUD feeds and scenes while enforcing validation against feed IDs.
+- **HTTP Layer**: Thin cpp-httplib wrapper (`http::HttpServer`) exposes project-scoped routes for feeds/scenes/cues under `/api/projects/{projectId}/*` plus renderer control; requests translate into domain operations.
+- **Repositories & DB Layer**: `db::SqliteConnection` plus schema migrations back repositories that CRUD project-scoped feeds/scenes/cues while enforcing validation against feed IDs within a project.
 - **Renderer Client Adapter**: `RendererClient` connects during startup and maps HTTP handler intents (ping, load scene, demo scene) to protocol messages before HTTP serving begins.
 - **Domain Integration**: Uses the core library’s types and JSON helpers to validate payloads and serialize messages consistently across layers.
 

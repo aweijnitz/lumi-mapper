@@ -14,7 +14,10 @@ struct VideoFileConfig {
 class Feed {
  public:
   Feed() = default;
-  Feed(FeedId id, std::string name, FeedType type, std::string configJson);
+  Feed(ProjectId projectId, FeedId id, std::string name, FeedType type, std::string configJson);
+
+  const ProjectId& getProjectId() const { return projectId_; }
+  void setProjectId(const ProjectId& projectId) { projectId_ = projectId; }
 
   const FeedId& getId() const { return id_; }
   void setId(const FeedId& id) { id_ = id; }
@@ -29,10 +32,12 @@ class Feed {
   void setConfigJson(const std::string& json) { configJson_ = json; }
 
   bool operator==(const Feed& other) const {
-    return id_ == other.id_ && name_ == other.name_ && type_ == other.type_ && configJson_ == other.configJson_;
+    return projectId_ == other.projectId_ && id_ == other.id_ && name_ == other.name_ && type_ == other.type_ &&
+           configJson_ == other.configJson_;
   }
 
  private:
+  ProjectId projectId_{};
   FeedId id_{};
   std::string name_{};
   FeedType type_{FeedType::VideoFile};
@@ -40,6 +45,7 @@ class Feed {
 };
 
 VideoFileConfig parseVideoFileConfig(const Feed& feed);
-Feed makeVideoFileFeed(const FeedId& id, const std::string& name, const std::string& filePath);
+Feed makeVideoFileFeed(const ProjectId& projectId, const FeedId& id, const std::string& name,
+                       const std::string& filePath);
 
 }  // namespace projection::core
