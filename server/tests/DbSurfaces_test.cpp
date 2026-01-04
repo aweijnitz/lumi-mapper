@@ -28,9 +28,31 @@ TEST_CASE("SchemaMigrations creates surfaces table", "[db][migrations][surfaces]
 
     char* errorMessage = nullptr;
     int result = sqlite3_exec(handle,
-                              "INSERT INTO surfaces(id, scene_id, name, feed_id, z_order, opacity, brightness, blend_mode, "
-                              "vertices_json) VALUES('s1', '1', 'Surf', 'f1', 0, 1.0, 1.0, 'Normal', '[]');",
+                              "INSERT INTO projects(id, name, description, settings_json) "
+                              "VALUES('proj-1', 'Project', 'desc', '{}');",
                               nullptr, nullptr, &errorMessage);
+    sqlite3_free(errorMessage);
+    REQUIRE(result == SQLITE_OK);
+
+    result = sqlite3_exec(handle,
+                          "INSERT INTO feeds(project_id, id, name, type, config_json) "
+                          "VALUES('proj-1', 'f1', 'Feed', 'VideoFile', '{}');",
+                          nullptr, nullptr, &errorMessage);
+    sqlite3_free(errorMessage);
+    REQUIRE(result == SQLITE_OK);
+
+    result = sqlite3_exec(handle,
+                          "INSERT INTO scenes(project_id, id, name, description) "
+                          "VALUES('proj-1', 'scene-1', 'Scene', 'desc');",
+                          nullptr, nullptr, &errorMessage);
+    sqlite3_free(errorMessage);
+    REQUIRE(result == SQLITE_OK);
+
+    result = sqlite3_exec(handle,
+                          "INSERT INTO surfaces(project_id, id, scene_id, name, feed_id, z_order, opacity, brightness, "
+                          "blend_mode, vertices_json) VALUES('proj-1', 's1', 'scene-1', 'Surf', 'f1', 0, 1.0, 1.0, "
+                          "'Normal', '[]');",
+                          nullptr, nullptr, &errorMessage);
     std::string errorStr = errorMessage ? errorMessage : "";
     sqlite3_free(errorMessage);
 

@@ -25,7 +25,8 @@ test('creates a new project from the menu', async ({ page }) => {
 
   await page.getByLabel('Project name').fill('Stage Mapping')
   await page.getByLabel('Project description').fill('Layout test project')
-  await page.getByRole('button', { name: 'Create' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New Project' })
+  await dialog.getByRole('button', { name: 'Create', exact: true }).click()
 
   const request = await requestPromise
   const payload = request.postDataJSON()

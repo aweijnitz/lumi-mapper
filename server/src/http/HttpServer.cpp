@@ -21,6 +21,21 @@ namespace projection::server::http {
 
 using nlohmann::json;
 
+namespace {
+void applyCueToScene(const core::Cue& cue, core::Scene& scene) {
+    for (auto& surface : scene.getSurfaces()) {
+        auto opacityIt = cue.getSurfaceOpacities().find(surface.getId());
+        if (opacityIt != cue.getSurfaceOpacities().end()) {
+            surface.setOpacity(opacityIt->second);
+        }
+        auto brightnessIt = cue.getSurfaceBrightnesses().find(surface.getId());
+        if (brightnessIt != cue.getSurfaceBrightnesses().end()) {
+            surface.setBrightness(brightnessIt->second);
+        }
+    }
+}
+}  // namespace
+
 HttpServer::HttpServer(repo::FeedRepository& feedRepository, repo::SceneRepository& sceneRepository,
                        repo::CueRepository& cueRepository, repo::ProjectRepository& projectRepository,
                        std::shared_ptr<renderer::RendererRegistry> rendererRegistry, bool verbose,
@@ -55,15 +70,19 @@ void HttpServer::registerRoutes() {
     (void)log;
 
     auto registerGet = [this](const std::string& path, ::httplib::Server::Handler handler) {
+        server_->Get(path, handler);
         server_->Get("/api" + path, handler);
     };
     auto registerPost = [this](const std::string& path, ::httplib::Server::Handler handler) {
+        server_->Post(path, handler);
         server_->Post("/api" + path, handler);
     };
     auto registerPut = [this](const std::string& path, ::httplib::Server::Handler handler) {
+        server_->Put(path, handler);
         server_->Put("/api" + path, handler);
     };
     auto registerDelete = [this](const std::string& path, ::httplib::Server::Handler handler) {
+        server_->Delete(path, handler);
         server_->Delete("/api" + path, handler);
     };
 
@@ -543,6 +562,88 @@ void HttpServer::registerRoutes() {
             }
             res.status = 200;
             res.set_content(json({{"status", "sent"}}).dump(), "application/json");
+        } catch (const json::exception& ex) {
+            respondWithError(res, 400, ex.what());
+        } catch (const std::exception& ex) {
+            respondWithError(res, 500, ex.what());
+        }
+    });
+
+    registerPost(R"(/projects/([^/]+)/renderer/playCue)",
+                 [this](const ::httplib::Request& req, ::httplib::Response& res) {
+        if (!rendererRegistry_) {
+            respondWithError(res, 500, "Renderer registry not configured");
+            return;
+        }
+
+        try {
+            if (req.matches.size() < 2) {
+                respondWithError(res, 400, "Missing project id");
+                return;
+            }
+            core::ProjectId projectId{req.matches[1]};
+            auto body = json::parse(req.body);
+            if (!body.contains("cueId") || !body["cueId"].is_string()) {
+                respondWithError(res, 400, "Missing or invalid cueId");
+                return;
+            }
+
+            core::CueId cueId{body["cueId"].get<std::string>()};
+            auto cue = cueRepository_.findCueById(projectId, cueId);
+            if (!cue.has_value()) {
+                respondWithError(res, 400, "Cue does not exist");
+                return;
+            }
+
+            auto scene = sceneRepository_.findSceneById(projectId, cue->getSceneId());
+            if (!scene.has_value()) {
+                respondWithError(res, 400, "Scene does not exist for cue");
+                return;
+            }
+
+            std::string cueError;
+            if (!core::validateCueForScene(*cue, *scene, cueError)) {
+                respondWithError(res, 400, cueError);
+                return;
+            }
+
+            auto feeds = feedRepository_.listFeeds(projectId);
+            std::string sceneError;
+            if (!core::validateSceneFeeds(*scene, feeds, sceneError)) {
+                respondWithError(res, 400, sceneError);
+                return;
+            }
+
+            core::Scene sceneWithCue = *scene;
+            applyCueToScene(*cue, sceneWithCue);
+
+            std::vector<core::Feed> rendererFeeds;
+            std::string feedError;
+            if (!collectFeedsForScene(sceneWithCue, rendererFeeds, feedError)) {
+                respondWithError(res, 400, feedError);
+                return;
+            }
+
+            if (verbose_) {
+                std::cerr << "[http] Forwarding cue project=" << projectId.value << " id=" << cueId.value
+                          << " scene=" << sceneWithCue.getId().value << " to renderer with " << rendererFeeds.size()
+                          << " feeds" << std::endl;
+            }
+
+            core::RendererMessage message{};
+            message.type = core::RendererMessageType::LoadSceneDefinition;
+            message.commandId = generateCommandId();
+            message.loadSceneDefinition = core::LoadSceneDefinitionMessage{sceneWithCue, rendererFeeds};
+
+            size_t sentCount = rendererRegistry_->broadcastMessage(message);
+            if (sentCount == 0) {
+                respondWithError(res, 503, "No renderers connected");
+                return;
+            }
+            res.status = 200;
+            res.set_content(json({{"status", "sent"}, {"cueId", cueId.value}, {"sceneId", sceneWithCue.getId().value}})
+                                .dump(),
+                            "application/json");
         } catch (const json::exception& ex) {
             respondWithError(res, 400, ex.what());
         } catch (const std::exception& ex) {

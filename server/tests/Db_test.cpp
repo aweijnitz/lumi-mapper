@@ -53,32 +53,38 @@ TEST_CASE("SchemaMigrations creates feeds and scenes tables", "[db][migrations]"
 
     char* errorMessage = nullptr;
     int result = sqlite3_exec(
-        handle, "INSERT INTO feeds(id, name, type, config_json) VALUES('feed-1', 'feed1', 'VideoFile', '{}');", nullptr,
-        nullptr, &errorMessage);
+        handle,
+        "INSERT INTO projects(id, name, description, settings_json) "
+        "VALUES('proj-1', 'Project', 'desc', '{}');",
+        nullptr, nullptr, &errorMessage);
     sqlite3_free(errorMessage);
     REQUIRE(result == SQLITE_OK);
 
     result =
-        sqlite3_exec(handle, "INSERT INTO scenes(id, name, description) VALUES('scene-1', 'scene1', 'desc');", nullptr,
-                     nullptr, &errorMessage);
+        sqlite3_exec(handle,
+                     "INSERT INTO feeds(project_id, id, name, type, config_json) "
+                     "VALUES('proj-1', 'feed-1', 'feed1', 'VideoFile', '{}');",
+                     nullptr, nullptr, &errorMessage);
     sqlite3_free(errorMessage);
     REQUIRE(result == SQLITE_OK);
 
-    result = sqlite3_exec(handle, "INSERT INTO cues(id, name, scene_id, surface_opacities_json, surface_brightnesses_json) "
-                                   "VALUES('cue-1', 'Cue', 'scene-1', '[]', '[]');",
-                          nullptr, nullptr, &errorMessage);
-    sqlite3_free(errorMessage);
-    REQUIRE(result == SQLITE_OK);
-
-    result = sqlite3_exec(handle, "INSERT INTO projects(id, name, description, settings_json) "
-                                   "VALUES('proj-1', 'Project', 'desc', '{}');",
+    result = sqlite3_exec(handle,
+                          "INSERT INTO scenes(project_id, id, name, description) "
+                          "VALUES('proj-1', 'scene-1', 'scene1', 'desc');",
                           nullptr, nullptr, &errorMessage);
     sqlite3_free(errorMessage);
     REQUIRE(result == SQLITE_OK);
 
     result = sqlite3_exec(handle,
-                          "INSERT INTO project_cues(project_id, cue_id, position) VALUES('proj-1', 'cue-1', 0);", nullptr,
-                          nullptr, &errorMessage);
+                          "INSERT INTO cues(project_id, id, name, scene_id, surface_opacities_json, surface_brightnesses_json) "
+                          "VALUES('proj-1', 'cue-1', 'Cue', 'scene-1', '[]', '[]');",
+                          nullptr, nullptr, &errorMessage);
+    sqlite3_free(errorMessage);
+    REQUIRE(result == SQLITE_OK);
+
+    result = sqlite3_exec(handle,
+                          "INSERT INTO project_cues(project_id, cue_id, position) VALUES('proj-1', 'cue-1', 0);",
+                          nullptr, nullptr, &errorMessage);
     sqlite3_free(errorMessage);
     REQUIRE(result == SQLITE_OK);
 

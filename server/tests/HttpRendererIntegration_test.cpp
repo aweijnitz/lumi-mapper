@@ -10,6 +10,7 @@
 #include "repo/CueRepository.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <cmath>
 #include <chrono>
 #include <condition_variable>
 #include <atomic>
@@ -317,6 +318,62 @@ TEST_CASE("LoadScene endpoint validates and forwards to renderer", "[http][rende
     REQUIRE(messagePayload.feeds.size() == 2);
     REQUIRE(messagePayload.feeds[0].getId().value == feedA.getId().value);
     REQUIRE(messagePayload.feeds[1].getId().value == feedB.getId().value);
+
+    std::filesystem::remove(dbPath);
+}
+
+TEST_CASE("PlayCue endpoint applies cue overrides and forwards scene", "[http][renderer]") {
+    const auto rendererPort = reservePort();
+    auto registry = std::make_shared<renderer::RendererRegistry>();
+    registry->start(rendererPort);
+    REQUIRE(waitForRegistry(*registry));
+    FakeRendererClient fakeRenderer("renderer-main", rendererPort);
+    REQUIRE(fakeRenderer.waitUntilReady());
+
+    const auto httpPort = reservePort();
+    const auto dbPath = tempDbPath("renderer_play_cue.db");
+    RendererHttpContext ctx(dbPath, registry);
+
+    core::Project project(core::ProjectId{"project-1"}, "Project", "", {}, core::ProjectSettings{});
+    ctx.projectRepo.createProject(project);
+
+    core::Feed feed(project.getId(), core::FeedId{"feed-1"}, "Feed A", core::FeedType::VideoFile,
+                    R"({"filePath":"a.mp4"})");
+    feed = ctx.feedRepo.createFeed(feed);
+
+    std::vector<core::Vec2> quad{{-0.5f, -0.5f}, {0.5f, -0.5f}, {0.5f, 0.5f}, {-0.5f, 0.5f}};
+    core::Surface surface(core::SurfaceId{"surface-1"}, "Surface", quad, feed.getId(), 1.0f, 1.0f);
+    core::Scene scene(project.getId(), core::SceneId{"scene-1"}, "Test", "Renderer scene",
+                      std::vector<core::Surface>{surface});
+    scene = ctx.sceneRepo.createScene(scene);
+
+    core::Cue cue(project.getId(), core::CueId{"cue-1"}, "Cue 1", scene.getId());
+    cue.getSurfaceOpacities().emplace(surface.getId(), 0.45f);
+    cue.getSurfaceBrightnesses().emplace(surface.getId(), 0.6f);
+    ctx.cueRepo.createCue(cue);
+
+    ServerRunner runner(ctx.httpServer, httpPort);
+    auto httpClient = makeClient(httpPort);
+    REQUIRE(waitForServer(*httpClient, ctx.httpServer));
+
+    nlohmann::json requestPayload{{"cueId", cue.getId().value}};
+    auto res = httpClient->Post(("/api/projects/" + project.getId().value + "/renderer/playCue").c_str(),
+                                requestPayload.dump(), "application/json");
+    REQUIRE(res != nullptr);
+    REQUIRE(res->status == 200);
+    REQUIRE(fakeRenderer.waitForMessages(1));
+
+    auto messages = fakeRenderer.messages();
+    REQUIRE(messages.front().type == core::RendererMessageType::LoadSceneDefinition);
+    REQUIRE(messages.front().loadSceneDefinition.has_value());
+    const auto& messagePayload = *messages.front().loadSceneDefinition;
+    REQUIRE(messagePayload.scene.getId().value == scene.getId().value);
+    REQUIRE(messagePayload.scene.getSurfaces().size() == 1);
+    const auto& updatedSurface = messagePayload.scene.getSurfaces().front();
+    REQUIRE(std::fabs(updatedSurface.getOpacity() - 0.45f) < 0.0001f);
+    REQUIRE(std::fabs(updatedSurface.getBrightness() - 0.6f) < 0.0001f);
+    REQUIRE(messagePayload.feeds.size() == 1);
+    REQUIRE(messagePayload.feeds[0].getId().value == feed.getId().value);
 
     std::filesystem::remove(dbPath);
 }

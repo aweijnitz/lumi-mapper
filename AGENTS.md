@@ -111,9 +111,11 @@ The repo is structured as a C++-oriented monorepo with four main components:
 - **HTTP API:** 
   - `GET /projects` list projects, `GET /projects/{id}` fetch one.
   - `POST /projects` create, `PUT /projects/{id}` update (id enforced from path), `DELETE /projects/{id}` remove.
-  - `GET/POST/PUT/DELETE /projects/{projectId}/feeds|scenes|cues` manage project-scoped entities (payloads include `projectId`).
-  - `POST /projects/{projectId}/renderer/loadScene` loads a scene from the specified project.
-  - Cue deletion is blocked when the cue is referenced by the same project.
+- `GET/POST/PUT/DELETE /projects/{projectId}/feeds|scenes|cues` manage project-scoped entities (payloads include `projectId`).
+- `POST /projects/{projectId}/renderer/loadScene` loads a scene from the specified project.
+- `POST /projects/{projectId}/renderer/playCue` loads the cue's scene (including cue surface overrides) on the renderer.
+- Cue deletion is blocked when the cue is referenced by the same project.
+- The server accepts both `/api/...` and root-level `/...` paths for the HTTP API.
 
 ---
 
