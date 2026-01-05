@@ -2,13 +2,15 @@
 
 A modular, open-source **projection/video mapping engine** written primarily in **C++**, designed to run on **Raspberry Pi** and **macOS**.
 
+__Highights__
+
 - Render multiple real-time **video feeds** onto **skewed rectangles/quads/meshes**.
 - Control playback and parameters via **MIDI**, **audio input energy**, and **remote clients**.
 - Persist **scenes, surfaces, feeds, cues** and configuration in an **embedded SQLite3** database file.
 - Use a **client–server model** so the machine connected to the projector can be controlled from other devices.
 
-> 📌 Architecture & conventions for agents and humans are documented in [`AGENTS.md`](./AGENTS.md).  
-> If you change anything important in the architecture, update `AGENTS.md` in the same PR.
+> Architecture & conventions for agents and humans are documented in [`AGENTS.md`](./AGENTS.md).  
+> Regardless if you are a human or a coding agent, if you change anything important in the architecture, update `AGENTS.md` in the same PR.
 
 ---
 
@@ -370,34 +372,3 @@ Note: `./scripts/build_all.sh` requires `OPENFRAMEWORKS_DIR` to be set.
    - Two separate videos should appear, each pinned to its own quad.
    - Turning MIDI CC #1 (a knob) modulates brightness.
    - Playing audio into the renderer’s input modulates the scale via input energy.
-
----
-
-## Repository Layout (Initial)
-
-```text
-/AGENTS.md                 # Architecture & rules for agents and humans
-/README.md                 # This file
-/CMakeLists.txt            # Top-level CMake
-
-/core/                     # Core C++ library (domain + protocol)
-/core/src/...
-/core/tests/...
-
-/server/                   # C++ server using core + embedded SQLite3
-/server/src/...
-/server/tests/...
-/server/CMakeLists.txt
-/server/Dockerfile         # Server Docker image
-
-/renderer/                 # C++ openFrameworks renderer
-/renderer/src/...
-/renderer/tests/...
-/renderer/addons.make...   # or openFrameworks project files
-
-/clients/                  # Client apps (CLI, GUI, etc. in C++)
-/clients/commandlineclient/...
-
-/data/                     # Default data dir (for local dev)
-/data/assets/              # Media assets
-/data/tmp/                 # Temp/cache files

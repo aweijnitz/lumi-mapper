@@ -35,6 +35,29 @@ require_binary() {
   fi
 }
 
+port_in_use() {
+  local port="$1"
+  if command -v lsof >/dev/null 2>&1; then
+    if lsof -n -iTCP:"${port}" -sTCP:LISTEN >/dev/null 2>&1; then
+      return 0
+    fi
+    return 1
+  fi
+  if command -v ss >/dev/null 2>&1; then
+    if ss -ltn "sport = :${port}" | tail -n +2 | grep -q .; then
+      return 0
+    fi
+    return 1
+  fi
+  if command -v netstat >/dev/null 2>&1; then
+    if netstat -an 2>/dev/null | grep -E "LISTEN[[:space:]]+.*[\\.:]${port}" >/dev/null; then
+      return 0
+    fi
+    return 1
+  fi
+  return 1
+}
+
 stop_pid() {
   local pid="$1"
   local name="$2"
@@ -64,6 +87,11 @@ stop_pid() {
 
 start() {
   require_binary "$SERVER_BIN" "server"
+
+  if port_in_use "$SERVER_PORT"; then
+    echo "Port ${SERVER_PORT} is already in use. Stop the existing listener or set SERVER_PORT to a free port."
+    exit 1
+  fi
 
   if [[ -f "$PID_FILE" ]]; then
     local pid

@@ -196,8 +196,11 @@ const createRandomId = () => {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
 
+const apiBase = import.meta.env.VITE_API_BASE ?? "";
+
 const requestJson = async <T>(url: string, options: RequestInit) => {
-  const response = await fetch(url, {
+  const requestUrl = apiBase ? new URL(url, apiBase).toString() : url;
+  const response = await fetch(requestUrl, {
     ...options,
     headers: {
       "Content-Type": "application/json",
