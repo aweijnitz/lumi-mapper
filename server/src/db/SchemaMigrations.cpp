@@ -149,6 +149,7 @@ void createTables(sqlite3* handle) {
 }  // namespace
 
 void SchemaMigrations::applyMigrations(SqliteConnection& connection) {
+    auto lock = connection.lock();
     sqlite3* handle = connection.getHandle();
     if (handle == nullptr) {
         throw std::runtime_error("SQLite connection is not open");

@@ -20,6 +20,7 @@ nlohmann::json serializeSurfaceValues(const std::map<core::SurfaceId, float>& va
 CueRepository::CueRepository(db::SqliteConnection& connection) : connection_(connection) {}
 
 core::Cue CueRepository::createCue(const core::Cue& cue) {
+    auto lock = connection_.lock();
     sqlite3* handle = connection_.getHandle();
     if (!handle) {
         throw std::runtime_error("SQLite connection is not open");
@@ -64,6 +65,7 @@ core::Cue CueRepository::createCue(const core::Cue& cue) {
 }
 
 std::vector<core::Cue> CueRepository::listCues(const core::ProjectId& projectId) {
+    auto lock = connection_.lock();
     sqlite3* handle = connection_.getHandle();
     if (!handle) {
         throw std::runtime_error("SQLite connection is not open");
@@ -117,6 +119,7 @@ std::vector<core::Cue> CueRepository::listCues(const core::ProjectId& projectId)
 }
 
 std::optional<core::Cue> CueRepository::findCueById(const core::ProjectId& projectId, const core::CueId& id) {
+    auto lock = connection_.lock();
     sqlite3* handle = connection_.getHandle();
     if (!handle) {
         throw std::runtime_error("SQLite connection is not open");
@@ -171,6 +174,7 @@ std::optional<core::Cue> CueRepository::findCueById(const core::ProjectId& proje
 }
 
 core::Cue CueRepository::updateCue(const core::Cue& cue) {
+    auto lock = connection_.lock();
     sqlite3* handle = connection_.getHandle();
     if (!handle) {
         throw std::runtime_error("SQLite connection is not open");
@@ -210,6 +214,7 @@ core::Cue CueRepository::updateCue(const core::Cue& cue) {
 }
 
 void CueRepository::deleteCue(const core::ProjectId& projectId, const core::CueId& id) {
+    auto lock = connection_.lock();
     sqlite3* handle = connection_.getHandle();
     if (!handle) {
         throw std::runtime_error("SQLite connection is not open");

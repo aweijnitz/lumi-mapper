@@ -20,6 +20,7 @@ std::string generateId() {
 FeedRepository::FeedRepository(db::SqliteConnection& connection) : connection_(connection) {}
 
 core::Feed FeedRepository::createFeed(const core::Feed& feed) {
+    auto lock = connection_.lock();
     sqlite3* handle = connection_.getHandle();
     if (handle == nullptr) {
         throw std::runtime_error("SQLite connection is not open");
@@ -82,6 +83,7 @@ core::Feed FeedRepository::createFeed(const core::Feed& feed) {
 }
 
 std::vector<core::Feed> FeedRepository::listFeeds(const core::ProjectId& projectId) {
+    auto lock = connection_.lock();
     sqlite3* handle = connection_.getHandle();
     if (handle == nullptr) {
         throw std::runtime_error("SQLite connection is not open");
@@ -132,6 +134,7 @@ std::vector<core::Feed> FeedRepository::listFeeds(const core::ProjectId& project
 }
 
 std::optional<core::Feed> FeedRepository::findFeedById(const core::ProjectId& projectId, const core::FeedId& feedId) {
+    auto lock = connection_.lock();
     sqlite3* handle = connection_.getHandle();
     if (handle == nullptr) {
         throw std::runtime_error("SQLite connection is not open");
@@ -183,6 +186,7 @@ std::optional<core::Feed> FeedRepository::findFeedById(const core::ProjectId& pr
 }
 
 core::Feed FeedRepository::updateFeed(const core::Feed& feed) {
+    auto lock = connection_.lock();
     sqlite3* handle = connection_.getHandle();
     if (handle == nullptr) {
         throw std::runtime_error("SQLite connection is not open");
@@ -222,6 +226,7 @@ core::Feed FeedRepository::updateFeed(const core::Feed& feed) {
 }
 
 void FeedRepository::deleteFeed(const core::ProjectId& projectId, const core::FeedId& id) {
+    auto lock = connection_.lock();
     sqlite3* handle = connection_.getHandle();
     if (handle == nullptr) {
         throw std::runtime_error("SQLite connection is not open");

@@ -20,6 +20,7 @@ std::string generateId() {
 SceneRepository::SceneRepository(db::SqliteConnection& connection) : connection_(connection) {}
 
 core::Scene SceneRepository::createScene(const core::Scene& scene) {
+    auto lock = connection_.lock();
     sqlite3* handle = connection_.getHandle();
     if (handle == nullptr) {
         throw std::runtime_error("SQLite connection is not open");
@@ -82,6 +83,7 @@ core::Scene SceneRepository::createScene(const core::Scene& scene) {
 }
 
 std::vector<core::Scene> SceneRepository::listScenes(const core::ProjectId& projectId) {
+    auto lock = connection_.lock();
     sqlite3* handle = connection_.getHandle();
     if (handle == nullptr) {
         throw std::runtime_error("SQLite connection is not open");
@@ -131,6 +133,7 @@ std::vector<core::Scene> SceneRepository::listScenes(const core::ProjectId& proj
 
 std::optional<core::Scene> SceneRepository::findSceneById(const core::ProjectId& projectId,
                                                           const core::SceneId& sceneId) {
+    auto lock = connection_.lock();
     sqlite3* handle = connection_.getHandle();
     if (handle == nullptr) {
         throw std::runtime_error("SQLite connection is not open");
@@ -182,6 +185,7 @@ bool SceneRepository::sceneExists(const core::ProjectId& projectId, const core::
 }
 
 core::Scene SceneRepository::updateScene(const core::Scene& scene) {
+    auto lock = connection_.lock();
     sqlite3* handle = connection_.getHandle();
     if (handle == nullptr) {
         throw std::runtime_error("SQLite connection is not open");
@@ -225,6 +229,7 @@ core::Scene SceneRepository::updateScene(const core::Scene& scene) {
 }
 
 void SceneRepository::deleteScene(const core::ProjectId& projectId, const core::SceneId& sceneId) {
+    auto lock = connection_.lock();
     sqlite3* handle = connection_.getHandle();
     if (handle == nullptr) {
         throw std::runtime_error("SQLite connection is not open");

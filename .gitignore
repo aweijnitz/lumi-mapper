@@ -377,6 +377,7 @@ out
 # Nuxt.js build / generate output
 .nuxt
 dist
+data/assets/Slow-drive-by-night-00.mp4
 
 # Gatsby files
 .cache/

@@ -1,6 +1,6 @@
 # lumi-composer
 
-This template should help get you started developing with Vue 3 in Vite.
+Projection Composer UI (Vue 3 + PrimeVue) for managing projects, scenes, feeds, surfaces, cues, and playback.
 
 ## Recommended IDE Setup
 
@@ -35,7 +35,21 @@ npm install
 npm run dev
 ```
 
-The dev server proxies API requests (e.g. `/api/projects`, `/api/projects/{projectId}/scenes`) to the C++ server running on `http://localhost:8080`.
+The dev server proxies API requests (e.g. `/api/projects`, `/api/projects/{projectId}/scenes`) to the C++ server running on `http://127.0.0.1:8080`.
+
+Optional environment overrides:
+- `VITE_API_TARGET` (Vite proxy target, default: `http://127.0.0.1:8080`)
+- `VITE_API_BASE` (fetch base URL used by tests and non-proxy requests)
+
+### Component Structure (Atomic Design)
+
+- `src/components/atoms`: primitives like headers, labels, small badges.
+- `src/components/molecules`: composed inputs/controls.
+- `src/components/organisms`: workflow sections (Projects, Scenes, Feeds, Surfaces, Cues, Playback, Asset Browser).
+- `src/components/templates`: layout scaffolding.
+- `src/views/ComposerView.vue`: main workflow layout.
+
+State lives in Pinia stores under `src/stores`, and HTTP lives in `src/composables/useApiClient.ts`.
 
 ### Type-Check, Compile and Minify for Production
 

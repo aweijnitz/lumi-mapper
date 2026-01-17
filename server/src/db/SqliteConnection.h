@@ -1,5 +1,6 @@
 #pragma once
 
+#include <mutex>
 #include <string>
 
 struct sqlite3;
@@ -17,8 +18,11 @@ public:
 
     void execute(const std::string& sql) const;
 
+    std::unique_lock<std::recursive_mutex> lock() const;
+
 private:
     sqlite3* handle_;
+    mutable std::recursive_mutex mutex_;
 };
 
 }  // namespace projection::server::db

@@ -8,6 +8,7 @@
 #include "repo/ProjectRepository.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -326,6 +327,46 @@ TEST_CASE("HTTP API can create, fetch, update, and delete projects", "[http][int
     REQUIRE(deleteRes->status == 204);
 
     std::filesystem::remove(dbPath);
+}
+
+TEST_CASE("HTTP API handles concurrent project list and create", "[http][integration][projects][concurrency]") {
+    auto dbPath = tempDbPath("http_api_projects_concurrent.db");
+    TestServerContext ctx(dbPath);
+    const auto port = reservePort();
+    ServerRunner runner(ctx.httpServer, port);
+    auto listClient = makeClient(port);
+    auto createClient = makeClient(port);
+    REQUIRE(waitForServer(*listClient, ctx.httpServer, runner));
+
+    std::atomic<bool> listOk{true};
+    std::atomic<bool> createOk{true};
+
+    std::thread listThread([&] {
+        for (int i = 0; i < 25; ++i) {
+            auto res = listClient->Get("/api/projects");
+            if (!res || res->status != 200) {
+                listOk = false;
+                return;
+            }
+        }
+    });
+
+    std::thread createThread([&] {
+        for (int i = 0; i < 10; ++i) {
+            const std::string projectId = "project-concurrent-" + std::to_string(i);
+            auto res = createClient->Post("/api/projects", projectBody(projectId, {}), "application/json");
+            if (!res || res->status != 201) {
+                createOk = false;
+                return;
+            }
+        }
+    });
+
+    listThread.join();
+    createThread.join();
+
+    REQUIRE(listOk);
+    REQUIRE(createOk);
 }
 
 TEST_CASE("HTTP API rejects projects referencing unknown cues", "[http][integration][projects][validation]") {

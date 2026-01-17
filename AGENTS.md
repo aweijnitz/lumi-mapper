@@ -114,6 +114,9 @@ The repo is structured as a C++-oriented monorepo with four main components:
 - `GET/POST/PUT/DELETE /projects/{projectId}/feeds|scenes|cues` manage project-scoped entities (payloads include `projectId`).
 - `POST /projects/{projectId}/renderer/loadScene` loads a scene from the specified project.
 - `POST /projects/{projectId}/renderer/playCue` loads the cue's scene (including cue surface overrides) on the renderer.
+- `GET /assets` lists filesystem assets (same under `/api/assets`) to populate the Composer asset browser.
+- `POST /assets` uploads an asset (multipart/form-data `file`, 2GB max).
+- `DELETE /assets/{name}` removes an asset by filename.
 - Cue deletion is blocked when the cue is referenced by the same project.
 - The server accepts both `/api/...` and root-level `/...` paths for the HTTP API.
 

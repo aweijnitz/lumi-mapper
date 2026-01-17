@@ -3,12 +3,30 @@
 #include <nlohmann/json.hpp>
 #include <sqlite3.h>
 
+#include <iostream>
 #include <stdexcept>
 #include <string>
 
 #include "projection/core/Serialization.h"
 
 namespace projection::server::repo {
+
+namespace {
+core::ProjectSettings parseSettingsJson(const unsigned char* settingsText, const std::string& projectId) {
+    std::string settings = settingsText ? reinterpret_cast<const char*>(settingsText) : "";
+    if (settings.empty()) {
+        return {};
+    }
+    try {
+        auto settingsJson = nlohmann::json::parse(settings);
+        return settingsJson.get<core::ProjectSettings>();
+    } catch (const std::exception& ex) {
+        std::cerr << "[repo] Failed to parse settings_json for project '" << projectId << "': " << ex.what()
+                  << std::endl;
+        return {};
+    }
+}
+}  // namespace
 
 ProjectRepository::ProjectRepository(db::SqliteConnection& connection) : connection_(connection) {}
 
@@ -59,6 +77,7 @@ void ProjectRepository::persistCueOrder(const core::ProjectId& projectId, const 
 }
 
 core::Project ProjectRepository::createProject(const core::Project& project) {
+    auto lock = connection_.lock();
     sqlite3* handle = connection_.getHandle();
     if (!handle) {
         throw std::runtime_error("SQLite connection is not open");
@@ -94,6 +113,7 @@ core::Project ProjectRepository::createProject(const core::Project& project) {
 }
 
 std::vector<core::Project> ProjectRepository::listProjects() {
+    auto lock = connection_.lock();
     sqlite3* handle = connection_.getHandle();
     if (!handle) {
         throw std::runtime_error("SQLite connection is not open");
@@ -116,8 +136,7 @@ std::vector<core::Project> ProjectRepository::listProjects() {
         std::string id = idText ? reinterpret_cast<const char*>(idText) : "";
         std::string name = nameText ? reinterpret_cast<const char*>(nameText) : "";
         std::string description = descText ? reinterpret_cast<const char*>(descText) : "";
-        auto settingsJson = nlohmann::json::parse(settingsText ? reinterpret_cast<const char*>(settingsText) : "{}");
-        core::ProjectSettings settings = settingsJson.get<core::ProjectSettings>();
+        core::ProjectSettings settings = parseSettingsJson(settingsText, id);
         projects.emplace_back(core::Project(core::ProjectId{id}, name, description, {}, settings));
     }
     if (rc != SQLITE_DONE) {
@@ -158,6 +177,7 @@ std::vector<core::Project> ProjectRepository::listProjects() {
 }
 
 std::optional<core::Project> ProjectRepository::findProjectById(const core::ProjectId& projectId) {
+    auto lock = connection_.lock();
     sqlite3* handle = connection_.getHandle();
     if (!handle) {
         throw std::runtime_error("SQLite connection is not open");
@@ -182,8 +202,7 @@ std::optional<core::Project> ProjectRepository::findProjectById(const core::Proj
 
         std::string name = nameText ? reinterpret_cast<const char*>(nameText) : "";
         std::string description = descText ? reinterpret_cast<const char*>(descText) : "";
-        auto settingsJson = nlohmann::json::parse(settingsText ? reinterpret_cast<const char*>(settingsText) : "{}");
-        core::ProjectSettings settings = settingsJson.get<core::ProjectSettings>();
+        core::ProjectSettings settings = parseSettingsJson(settingsText, projectId.value);
         sqlite3_finalize(stmt);
 
         const char* cuesSql = "SELECT cue_id FROM project_cues WHERE project_id=? ORDER BY position ASC;";
@@ -214,6 +233,7 @@ std::optional<core::Project> ProjectRepository::findProjectById(const core::Proj
 }
 
 core::Project ProjectRepository::updateProject(const core::Project& project) {
+    auto lock = connection_.lock();
     sqlite3* handle = connection_.getHandle();
     if (!handle) {
         throw std::runtime_error("SQLite connection is not open");
@@ -249,6 +269,7 @@ core::Project ProjectRepository::updateProject(const core::Project& project) {
 }
 
 void ProjectRepository::deleteProject(const core::ProjectId& projectId) {
+    auto lock = connection_.lock();
     sqlite3* handle = connection_.getHandle();
     if (!handle) {
         throw std::runtime_error("SQLite connection is not open");

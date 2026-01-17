@@ -79,3 +79,27 @@ TEST_CASE("ProjectRepository persists and retrieves ordered cues", "[repo][proje
     std::vector<int> updatedChannels{2, 3};
     REQUIRE(fetched->getSettings().midiChannels == updatedChannels);
 }
+
+TEST_CASE("ProjectRepository tolerates empty settings_json values", "[repo][project]") {
+    SqliteConnection connection;
+    auto dbPath = tempDb("project_repo_empty_settings.sqlite");
+    std::filesystem::remove(dbPath);
+    connection.open(dbPath.string());
+    SchemaMigrations::applyMigrations(connection);
+
+    connection.execute("INSERT INTO projects(id, name, description, settings_json) "
+                       "VALUES('proj-empty', 'Empty', 'No settings', '');");
+
+    ProjectRepository projectRepo(connection);
+    auto projects = projectRepo.listProjects();
+    REQUIRE(projects.size() == 1);
+    REQUIRE(projects.front().getSettings().controllers.empty());
+    REQUIRE(projects.front().getSettings().midiChannels.empty());
+    REQUIRE(projects.front().getSettings().globalConfig.empty());
+
+    auto fetched = projectRepo.findProjectById(makeProjectId("proj-empty"));
+    REQUIRE(fetched.has_value());
+    REQUIRE(fetched->getSettings().controllers.empty());
+    REQUIRE(fetched->getSettings().midiChannels.empty());
+    REQUIRE(fetched->getSettings().globalConfig.empty());
+}

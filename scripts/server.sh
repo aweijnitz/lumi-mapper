@@ -14,13 +14,13 @@ set -euo pipefail
 #   SERVER_DB     SQLite DB path (default: <repo>/data/db/projection.db)
 #   SERVER_ARGS   Extra args for server (e.g., "--verbose")
 #   PID_FILE      File to record process ID (default: /tmp/lumi-server.pid)
-#   SERVER_LOG    Log file for server stdout/stderr (default: /tmp/lumi_server.log)
+#   SERVER_LOG    Log file for server stdout/stderr (default: <repo>/logs/lumi_server.log)
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${BUILD_DIR:-"${ROOT_DIR}/build"}"
 SERVER_BIN="${SERVER_BIN:-${BUILD_DIR}/server/lumi_server}"
 PID_FILE="${PID_FILE:-/tmp/lumi-server.pid}"
-SERVER_LOG="${SERVER_LOG:-/tmp/lumi_server.log}"
+SERVER_LOG="${SERVER_LOG:-${ROOT_DIR}/logs/lumi_server.log}"
 SERVER_PORT="${SERVER_PORT:-8080}"
 RENDERER_PORT="${RENDERER_PORT:-5050}"
 SERVER_DB="${SERVER_DB:-${ROOT_DIR}/data/db/projection.db}"
@@ -108,6 +108,7 @@ start() {
     --db "$SERVER_DB"
     --port "$SERVER_PORT"
     --renderer-port "$RENDERER_PORT"
+    --verbose
   )
   if [[ -n "${SERVER_ARGS:-}" ]]; then
     # shellcheck disable=SC2206
@@ -115,6 +116,7 @@ start() {
     server_cmd+=("${extra_args[@]}")
   fi
 
+  mkdir -p "$(dirname "$SERVER_LOG")"
   echo "Starting server (HTTP ${SERVER_PORT}, renderer listen ${RENDERER_PORT}) -> $SERVER_LOG"
   "${server_cmd[@]}" >"$SERVER_LOG" 2>&1 &
   local server_pid=$!

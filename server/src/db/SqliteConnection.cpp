@@ -3,6 +3,7 @@
 #include <sqlite3.h>
 
 #include <stdexcept>
+#include <mutex>
 #include <utility>
 
 namespace projection::server::db {
@@ -17,6 +18,7 @@ SqliteConnection::~SqliteConnection() {
 }
 
 void SqliteConnection::open(const std::string& path) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (handle_ != nullptr) {
         sqlite3_close(handle_);
         handle_ = nullptr;
@@ -41,6 +43,7 @@ void SqliteConnection::open(const std::string& path) {
 sqlite3* SqliteConnection::getHandle() const { return handle_; }
 
 void SqliteConnection::execute(const std::string& sql) const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     char* errorMessage = nullptr;
     int result = sqlite3_exec(handle_, sql.c_str(), nullptr, nullptr, &errorMessage);
     if (result != SQLITE_OK) {
@@ -48,6 +51,10 @@ void SqliteConnection::execute(const std::string& sql) const {
         sqlite3_free(errorMessage);
         throw std::runtime_error("SQLite execution failed: " + error);
     }
+}
+
+std::unique_lock<std::recursive_mutex> SqliteConnection::lock() const {
+    return std::unique_lock<std::recursive_mutex>(mutex_);
 }
 
 }  // namespace projection::server::db

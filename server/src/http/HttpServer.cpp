@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <vector>
+#include <cstdint>
 #include <unordered_map>
 #include <unordered_set>
 #include <optional>
@@ -33,6 +34,39 @@ void applyCueToScene(const core::Cue& cue, core::Scene& scene) {
             surface.setBrightness(brightnessIt->second);
         }
     }
+}
+
+std::optional<std::filesystem::path> findAssetsRoot() {
+    const std::vector<std::filesystem::path> candidates = {
+        std::filesystem::current_path() / "data" / "assets",
+        std::filesystem::current_path().parent_path() / "data" / "assets",
+        std::filesystem::current_path().parent_path().parent_path() / "data" / "assets"};
+    for (const auto& candidate : candidates) {
+        if (std::filesystem::exists(candidate) && std::filesystem::is_directory(candidate)) {
+            return std::filesystem::weakly_canonical(candidate);
+        }
+    }
+    return std::nullopt;
+}
+
+std::string assetTypeForPath(const std::filesystem::path& path) {
+    const auto ext = path.extension().string();
+    if (ext == ".mp4" || ext == ".mov" || ext == ".avi" || ext == ".mkv") {
+        return "video";
+    }
+    if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".gif") {
+        return "image";
+    }
+    return "unknown";
+}
+
+std::optional<std::string> sanitizeAssetName(const std::string& raw) {
+    std::filesystem::path candidate(raw);
+    const auto name = candidate.filename().string();
+    if (name.empty() || name == "." || name == "..") {
+        return std::nullopt;
+    }
+    return name;
 }
 }  // namespace
 
@@ -411,9 +445,10 @@ void HttpServer::registerRoutes() {
         }
     });
 
-    registerGet("/projects", [this](const ::httplib::Request&, ::httplib::Response& res) {
+    registerGet("/projects", [this, log](const ::httplib::Request&, ::httplib::Response& res) {
         try {
             const auto projects = projectRepository_.listProjects();
+            log("Listing projects count=" + std::to_string(projects.size()));
             res.status = 200;
             res.set_content(json(projects).dump(), "application/json");
         } catch (const std::exception& ex) {
@@ -421,13 +456,14 @@ void HttpServer::registerRoutes() {
         }
     });
 
-    registerGet(R"(/projects/(.+))", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+    registerGet(R"(/projects/(.+))", [this, log](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
             if (req.matches.size() < 2) {
                 respondWithError(res, 400, "Missing project id");
                 return;
             }
             auto projectId = core::ProjectId{req.matches[1]};
+            log("Fetching project id=" + projectId.value);
             auto project = projectRepository_.findProjectById(projectId);
             if (!project.has_value()) {
                 respondWithError(res, 404, "Project not found");
@@ -440,10 +476,12 @@ void HttpServer::registerRoutes() {
         }
     });
 
-    registerPost("/projects", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+    registerPost("/projects", [this, log](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
             auto body = json::parse(req.body);
             auto project = body.get<core::Project>();
+            log("Received project create id=" + project.getId().value + " name=" + project.getName() +
+                " cueCount=" + std::to_string(project.getCueOrder().size()));
             auto cues = cueRepository_.listCues(project.getId());
             std::string error;
             if (!core::validateProjectCues(project, cues, error)) {
@@ -451,6 +489,7 @@ void HttpServer::registerRoutes() {
                 return;
             }
             auto created = projectRepository_.createProject(project);
+            log("Created project id=" + created.getId().value);
             res.status = 201;
             res.set_content(json(created).dump(), "application/json");
         } catch (const std::exception& ex) {
@@ -458,7 +497,7 @@ void HttpServer::registerRoutes() {
         }
     });
 
-    registerPut(R"(/projects/(.+))", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+    registerPut(R"(/projects/(.+))", [this, log](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
             if (req.matches.size() < 2) {
                 respondWithError(res, 400, "Missing project id");
@@ -467,6 +506,8 @@ void HttpServer::registerRoutes() {
             auto body = json::parse(req.body);
             auto project = body.get<core::Project>();
             project.setId(core::ProjectId{req.matches[1]});
+            log("Received project update id=" + project.getId().value + " name=" + project.getName() +
+                " cueCount=" + std::to_string(project.getCueOrder().size()));
             auto cues = cueRepository_.listCues(project.getId());
             std::string error;
             if (!core::validateProjectCues(project, cues, error)) {
@@ -474,6 +515,7 @@ void HttpServer::registerRoutes() {
                 return;
             }
             auto updated = projectRepository_.updateProject(project);
+            log("Updated project id=" + updated.getId().value);
             res.status = 200;
             res.set_content(json(updated).dump(), "application/json");
         } catch (const std::exception& ex) {
@@ -481,16 +523,146 @@ void HttpServer::registerRoutes() {
         }
     });
 
-    registerDelete(R"(/projects/(.+))", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+    registerDelete(R"(/projects/(.+))", [this, log](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
             if (req.matches.size() < 2) {
                 respondWithError(res, 400, "Missing project id");
                 return;
             }
+            log("Deleting project id=" + std::string(req.matches[1]));
             projectRepository_.deleteProject(core::ProjectId{req.matches[1]});
             res.status = 204;
         } catch (const std::exception& ex) {
             respondWithError(res, 400, ex.what());
+        }
+    });
+
+    registerGet("/assets", [this](const ::httplib::Request&, ::httplib::Response& res) {
+        try {
+            auto root = findAssetsRoot();
+            if (!root.has_value()) {
+                respondWithError(res, 404, "Assets directory not found.");
+                return;
+            }
+            json payload = json::array();
+            for (const auto& entry : std::filesystem::directory_iterator(*root)) {
+                if (!entry.is_regular_file()) {
+                    continue;
+                }
+                const auto path = entry.path();
+                const auto name = path.filename().string();
+                json asset{{"id", name}, {"name", name}, {"path", path.string()}, {"type", assetTypeForPath(path)}};
+                payload.push_back(asset);
+            }
+            res.status = 200;
+            res.set_content(payload.dump(), "application/json");
+        } catch (const std::exception& ex) {
+            respondWithError(res, 500, ex.what());
+        }
+    });
+
+    registerPost("/assets", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+        constexpr uint64_t kMaxAssetBytes = 2ull * 1024ull * 1024ull * 1024ull;
+        try {
+            auto lengthHeader = req.get_header_value("Content-Length");
+            if (!lengthHeader.empty()) {
+                try {
+                    const auto length = static_cast<uint64_t>(std::stoull(lengthHeader));
+                    if (length > kMaxAssetBytes) {
+                        respondWithError(res, 413, "Asset upload exceeds 2GB limit.");
+                        return;
+                    }
+                } catch (const std::exception&) {
+                    respondWithError(res, 400, "Invalid Content-Length header.");
+                    return;
+                }
+            }
+
+            if (!req.is_multipart_form_data()) {
+                respondWithError(res, 400, "Expected multipart/form-data upload.");
+                return;
+            }
+
+            auto file = req.get_file_value("file");
+            if (file.filename.empty()) {
+                respondWithError(res, 400, "Missing file upload.");
+                return;
+            }
+
+            const auto safeName = sanitizeAssetName(file.filename);
+            if (!safeName.has_value()) {
+                respondWithError(res, 400, "Invalid asset filename.");
+                return;
+            }
+
+            auto root = findAssetsRoot();
+            if (!root.has_value()) {
+                const auto fallbackRoot = std::filesystem::current_path() / "data" / "assets";
+                std::filesystem::create_directories(fallbackRoot);
+                root = std::filesystem::weakly_canonical(fallbackRoot);
+            }
+
+            const auto targetPath = *root / *safeName;
+            if (std::filesystem::exists(targetPath)) {
+                respondWithError(res, 409, "Asset already exists.");
+                return;
+            }
+
+            if (static_cast<uint64_t>(file.content.size()) > kMaxAssetBytes) {
+                respondWithError(res, 413, "Asset upload exceeds 2GB limit.");
+                return;
+            }
+
+            std::ofstream output(targetPath, std::ios::binary | std::ios::out);
+            if (!output) {
+                respondWithError(res, 500, "Failed to open asset destination.");
+                return;
+            }
+            output.write(file.content.data(), static_cast<std::streamsize>(file.content.size()));
+            if (!output) {
+                respondWithError(res, 500, "Failed to write asset.");
+                return;
+            }
+
+            json asset{{"id", *safeName},
+                       {"name", *safeName},
+                       {"path", targetPath.string()},
+                       {"type", assetTypeForPath(targetPath)}};
+            res.status = 201;
+            res.set_content(asset.dump(), "application/json");
+        } catch (const std::exception& ex) {
+            respondWithError(res, 500, ex.what());
+        }
+    });
+
+    registerDelete(R"(/assets/(.+))", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+        try {
+            if (req.matches.size() < 2) {
+                respondWithError(res, 400, "Missing asset name");
+                return;
+            }
+            const auto safeName = sanitizeAssetName(std::string(req.matches[1]));
+            if (!safeName.has_value()) {
+                respondWithError(res, 400, "Invalid asset filename.");
+                return;
+            }
+
+            auto root = findAssetsRoot();
+            if (!root.has_value()) {
+                respondWithError(res, 404, "Assets directory not found.");
+                return;
+            }
+
+            const auto targetPath = *root / *safeName;
+            if (!std::filesystem::exists(targetPath)) {
+                respondWithError(res, 404, "Asset not found.");
+                return;
+            }
+
+            std::filesystem::remove(targetPath);
+            res.status = 204;
+        } catch (const std::exception& ex) {
+            respondWithError(res, 500, ex.what());
         }
     });
 

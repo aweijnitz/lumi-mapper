@@ -14,6 +14,7 @@ SurfaceRepository::SurfaceRepository(db::SqliteConnection& connection) : connect
 
 core::Surface SurfaceRepository::createSurface(const core::Surface& surface, const core::ProjectId& projectId,
                                                const core::SceneId& sceneId) {
+    auto lock = connection_.lock();
     sqlite3* handle = connection_.getHandle();
     if (handle == nullptr) {
         throw std::runtime_error("SQLite connection is not open");
@@ -110,6 +111,7 @@ core::Surface SurfaceRepository::createSurface(const core::Surface& surface, con
 
 std::vector<core::Surface> SurfaceRepository::listSurfacesForScene(const core::ProjectId& projectId,
                                                                     const core::SceneId& sceneId) {
+    auto lock = connection_.lock();
     sqlite3* handle = connection_.getHandle();
     if (handle == nullptr) {
         throw std::runtime_error("SQLite connection is not open");
@@ -178,6 +180,7 @@ std::vector<core::Surface> SurfaceRepository::listSurfacesForScene(const core::P
 }
 
 void SurfaceRepository::deleteSurfacesForScene(const core::ProjectId& projectId, const core::SceneId& sceneId) {
+    auto lock = connection_.lock();
     sqlite3* handle = connection_.getHandle();
     if (handle == nullptr) {
         throw std::runtime_error("SQLite connection is not open");

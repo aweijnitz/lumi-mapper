@@ -1,37 +1,74 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from "@playwright/test";
 
-test('creates a new project from the menu', async ({ page }) => {
+test("creates a new project from the project panel", async ({ page }) => {
   const requestPromise = page.waitForRequest((request) => {
-    return request.url().includes('/api/projects') && request.method() === 'POST'
-  })
+    return request.url().includes("/api/projects") && request.method() === "POST";
+  });
 
-  await page.route('**/api/projects', async (route) => {
-    if (route.request().method() === 'POST') {
+  const readJsonBody = (route: Parameters<Parameters<typeof page.route>[1]>[0]) => {
+    try {
+      return route.request().postDataJSON();
+    } catch {
+      return null;
+    }
+  };
+
+  await page.route("**/*", async (route) => {
+    const url = new URL(route.request().url());
+    const method = route.request().method();
+    const body = readJsonBody(route);
+
+    if (!url.pathname.startsWith("/api/")) {
+      await route.fallback();
+      return;
+    }
+
+    if (url.pathname === "/api/projects" && method === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([]),
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/assets" && method === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([]),
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/projects" && method === "POST" && body) {
       await route.fulfill({
         status: 201,
-        contentType: 'application/json',
-        body: JSON.stringify({ ok: true }),
-      })
-      return
+        contentType: "application/json",
+        body: JSON.stringify(body),
+      });
+      return;
     }
-    await route.fallback()
-  })
 
-  await page.goto('/')
-  await page.getByRole('button', { name: 'Project' }).click()
-  const newProjectItem = page.getByRole('menuitem', { name: 'New Project' })
-  await expect(newProjectItem).toBeVisible()
-  await newProjectItem.click()
+    await route.fulfill({
+      status: 404,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Unhandled test route" }),
+    });
+  });
 
-  await page.getByLabel('Project name').fill('Stage Mapping')
-  await page.getByLabel('Project description').fill('Layout test project')
-  const dialog = page.getByRole('dialog', { name: 'New Project' })
-  await dialog.getByRole('button', { name: 'Create', exact: true }).click()
+  await page.goto("/");
+  await page.getByRole("button", { name: "New Project" }).click();
 
-  const request = await requestPromise
-  const payload = request.postDataJSON()
+  await page.getByLabel("Project name").fill("Stage Mapping");
+  await page.getByLabel("Project description").fill("Layout test project");
+  const dialog = page.getByRole("dialog", { name: "New Project" });
+  await dialog.getByRole("button", { name: "Create" }).click();
 
-  expect(payload.name).toBe('Stage Mapping')
-  expect(payload.description).toBe('Layout test project')
-  expect(payload.cueOrder).toEqual([])
-})
+  const request = await requestPromise;
+  const payload = request.postDataJSON();
+
+  expect(payload.name).toBe("Stage Mapping");
+  expect(payload.description).toBe("Layout test project");
+  expect(payload.cueOrder).toEqual([]);
+});
