@@ -29,7 +29,13 @@ void ofApp::setup() {
   client_.start();
 
   // Load grayscale shader for monochrome filter
-  grayscaleShaderLoaded_ = grayscaleShader_.load("shaders/grayscale");
+  // Try multiple paths: openFrameworks looks in data/ by default, but when running
+  // from build directory we may need to look in data/shaders/ directly
+  grayscaleShaderLoaded_ = grayscaleShader_.load("data/shaders/grayscale");
+  if (!grayscaleShaderLoaded_) {
+    // Fallback: try without data/ prefix (in case ofSetDataPathRoot was used)
+    grayscaleShaderLoaded_ = grayscaleShader_.load("shaders/grayscale");
+  }
   if (verbose_) {
     if (grayscaleShaderLoaded_) {
       std::cerr << "[renderer] grayscale shader loaded successfully" << std::endl;

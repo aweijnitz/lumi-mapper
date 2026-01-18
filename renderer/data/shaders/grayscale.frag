@@ -1,14 +1,15 @@
-#version 150
+#version 120
+
+#extension GL_ARB_texture_rectangle : enable
 
 uniform sampler2DRect tex0;
 uniform float brightness;
 uniform float alpha;
 
-in vec2 vTexCoord;
-out vec4 fragColor;
+varying vec2 vTexCoord;
 
 void main() {
-    vec4 texColor = texture(tex0, vTexCoord);
+    vec4 texColor = texture2DRect(tex0, vTexCoord);
 
     // Convert to grayscale using luminance formula (ITU-R BT.709)
     // This weights colors by human perception: green is brightest, blue is darkest
@@ -17,5 +18,5 @@ void main() {
     // Apply brightness and alpha
     vec3 gray = vec3(luminance * brightness);
 
-    fragColor = vec4(gray, texColor.a * alpha);
+    gl_FragColor = vec4(gray, texColor.a * alpha);
 }

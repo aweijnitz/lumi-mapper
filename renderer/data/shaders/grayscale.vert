@@ -1,13 +1,8 @@
-#version 150
+#version 120
 
-uniform mat4 modelViewProjectionMatrix;
-
-in vec4 position;
-in vec2 texcoord;
-
-out vec2 vTexCoord;
+varying vec2 vTexCoord;
 
 void main() {
-    vTexCoord = texcoord;
-    gl_Position = modelViewProjectionMatrix * position;
+    vTexCoord = gl_MultiTexCoord0.xy;
+    gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;
 }
