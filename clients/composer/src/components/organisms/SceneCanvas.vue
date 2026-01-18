@@ -150,6 +150,17 @@ watch(
   { deep: true },
 );
 
+// Watch for scene settings changes (filter, palette) when live preview is enabled
+watch(
+  () => activeScene.value?.settings,
+  () => {
+    if (livePreview.value) {
+      debouncedPreview();
+    }
+  },
+  { deep: true },
+);
+
 // When live preview is enabled, immediately send the current scene to renderer
 // We check activeScene.value directly instead of canPreview to avoid blocking
 // on rendererStore.isLoading from unrelated operations like ping

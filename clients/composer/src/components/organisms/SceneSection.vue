@@ -7,12 +7,14 @@ import Column from "primevue/column";
 import InputText from "primevue/inputtext";
 import Textarea from "primevue/textarea";
 import Message from "primevue/message";
+import Select from "primevue/select";
 import SectionHeader from "../atoms/SectionHeader.vue";
 import { useProjectStore } from "../../stores/projectStore";
 import { useSceneStore } from "../../stores/sceneStore";
 import { useCueStore } from "../../stores/cueStore";
 import { createId } from "../../composables/useIds";
-import type { Scene } from "../../types/scene";
+import type { Scene, SceneFilter, SceneSettings } from "../../types/scene";
+import { defaultSceneSettings, sceneFilterLabels } from "../../types/scene";
 
 const projectStore = useProjectStore();
 const sceneStore = useSceneStore();
@@ -21,7 +23,24 @@ const { scenes, activeScene, isLoading, error } = storeToRefs(sceneStore);
 
 const name = ref("");
 const description = ref("");
+const filter = ref<SceneFilter>("none");
+const colorPaletteIndex = ref(0);
 const localError = ref<string | null>(null);
+
+// Filter options for the dropdown
+const filterOptions = Object.entries(sceneFilterLabels).map(([value, label]) => ({
+  value: value as SceneFilter,
+  label,
+}));
+
+// Palette options (matches renderer's kNumPalettes = 5)
+const paletteOptions = [
+  { value: 0, label: "Mixed Neon" },
+  { value: 1, label: "Cyan/Magenta" },
+  { value: 2, label: "Fire/Ice" },
+  { value: 3, label: "Tropical" },
+  { value: 4, label: "Noir" },
+];
 
 const canCreate = computed(() =>
   Boolean(projectStore.activeProject && name.value.trim().length > 0 && !isLoading.value),
@@ -52,10 +71,15 @@ const syncForm = (scene: Scene | null) => {
   if (!scene) {
     name.value = "";
     description.value = "";
+    filter.value = "none";
+    colorPaletteIndex.value = 0;
     return;
   }
   name.value = scene.name;
   description.value = scene.description;
+  const settings = scene.settings ?? defaultSceneSettings;
+  filter.value = settings.filter;
+  colorPaletteIndex.value = settings.colorPaletteIndex;
 };
 
 watch(
@@ -72,27 +96,42 @@ const createScene = async () => {
     return;
   }
 
+  const settings: SceneSettings = {
+    filter: filter.value,
+    colorPaletteIndex: colorPaletteIndex.value,
+  };
+
   const payload: Scene = {
     projectId: projectStore.activeProject.id,
     id: createId("scene"),
     name: name.value.trim(),
     description: description.value.trim(),
     surfaces: [],
+    settings,
   };
 
   await sceneStore.createScene(payload);
   name.value = "";
   description.value = "";
+  filter.value = "none";
+  colorPaletteIndex.value = 0;
 };
 
 const updateScene = async () => {
   if (!projectStore.activeProject || !activeScene.value) {
     return;
   }
+
+  const settings: SceneSettings = {
+    filter: filter.value,
+    colorPaletteIndex: colorPaletteIndex.value,
+  };
+
   const payload: Scene = {
     ...activeScene.value,
     name: name.value.trim(),
     description: description.value.trim(),
+    settings,
   };
   await sceneStore.updateScene(payload);
 };
@@ -129,6 +168,30 @@ const deleteScene = async () => {
       <div class="scene-section__form">
         <InputText v-model="name" placeholder="Scene name" />
         <Textarea v-model="description" placeholder="Scene description" rows="2" autoResize />
+      </div>
+      <div class="scene-section__settings">
+        <div class="scene-section__setting">
+          <label class="scene-section__label">Filter</label>
+          <Select
+            v-model="filter"
+            :options="filterOptions"
+            optionLabel="label"
+            optionValue="value"
+            placeholder="Select filter"
+            class="scene-section__select"
+          />
+        </div>
+        <div v-if="filter === 'colorTint'" class="scene-section__setting">
+          <label class="scene-section__label">Palette</label>
+          <Select
+            v-model="colorPaletteIndex"
+            :options="paletteOptions"
+            optionLabel="label"
+            optionValue="value"
+            placeholder="Select palette"
+            class="scene-section__select"
+          />
+        </div>
       </div>
       <div class="scene-section__actions">
         <Button label="Add Scene" icon="pi pi-plus" :disabled="!canCreate" @click="createScene" />
@@ -179,6 +242,29 @@ const deleteScene = async () => {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 6px;
   align-items: start;
+}
+
+.scene-section__settings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.scene-section__setting {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scene-section__label {
+  font-size: 12px;
+  color: #888;
+  min-width: 50px;
+}
+
+.scene-section__select {
+  min-width: 140px;
 }
 
 .scene-section__actions {

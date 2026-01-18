@@ -206,6 +206,17 @@ target_link_libraries(renderer_default
 target_compile_features(renderer_default PRIVATE cxx_std_17)
 target_link_options(renderer_default PRIVATE ${OPENFRAMEWORKS_FRAMEWORK_OPTIONS})
 
+# Copy shader data files to the output directory where the renderer can find them
+set(RENDERER_DATA_DIR ${CMAKE_CURRENT_SOURCE_DIR}/data)
+if(EXISTS ${RENDERER_DATA_DIR})
+    add_custom_command(TARGET renderer_default POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${RENDERER_DATA_DIR}
+            $<TARGET_FILE_DIR:renderer_default>/data
+        COMMENT "Copying renderer data files (shaders, etc.)"
+    )
+endif()
+
 add_executable(renderer_hello
     ${RENDERER_SRC_DIR}/hello_main.cpp
     ${RENDERER_SRC_DIR}/util/ShutdownUtils.cpp

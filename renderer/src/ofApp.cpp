@@ -28,6 +28,16 @@ void ofApp::setup() {
   }
   client_.start();
 
+  // Load grayscale shader for monochrome filter
+  grayscaleShaderLoaded_ = grayscaleShader_.load("shaders/grayscale");
+  if (verbose_) {
+    if (grayscaleShaderLoaded_) {
+      std::cerr << "[renderer] grayscale shader loaded successfully" << std::endl;
+    } else {
+      std::cerr << "[renderer] grayscale shader failed to load; monochrome filter will use fallback" << std::endl;
+    }
+  }
+
 #if PROJECTION_HAS_OFX_MIDI
   midiIn_.openPort(0);
   midiIn_.addListener(this);
@@ -244,23 +254,54 @@ void ofApp::draw() {
     const float brightness = std::clamp(surface.getBrightness(), 0.0f, 1.0f);
     const int alphaValue = static_cast<int>(std::round(alpha * 255.0f));
 
-    // Apply tint color per-surface: each surface gets a unique color from the palette
-    // This gives each video stream its own solid tint while maintaining a coherent palette
-    if (colorTintEnabled_ && monochromeEnabled_) {
-      const int paletteIdx = tintPaletteIndex_ % kNumPalettes;
+    // Apply filter based on scene settings (or fall back to renderer defaults)
+    const auto& sceneSettings = scene.getSettings();
+    const bool useColorTint = sceneSettings.filter == projection::core::SceneFilter::ColorTint ||
+                              (sceneSettings.filter == projection::core::SceneFilter::None && colorTintEnabled_ && monochromeEnabled_);
+    const bool useMonochrome = sceneSettings.filter == projection::core::SceneFilter::Monochrome ||
+                               (sceneSettings.filter == projection::core::SceneFilter::None && monochromeEnabled_ && !colorTintEnabled_);
+
+    auto& texture = player.getTexture();
+    if (!texture.isAllocated()) {
+      continue;
+    }
+
+    if (useColorTint) {
+      // Apply tint color per-surface: each surface gets a unique color from the palette
+      const int paletteIdx = (sceneSettings.filter == projection::core::SceneFilter::ColorTint ?
+                              sceneSettings.colorPaletteIndex : tintPaletteIndex_) % kNumPalettes;
       const int colorIdx = currentSurfaceIndex % kColorsPerPalette;
       const TintColor& tint = kTintPalettes[paletteIdx][colorIdx];
       const int r = static_cast<int>(std::round(brightness * tint.r * 255.0f));
       const int g = static_cast<int>(std::round(brightness * tint.g * 255.0f));
       const int b = static_cast<int>(std::round(brightness * tint.b * 255.0f));
       ofSetColor(r, g, b, alphaValue);
+      texture.bind();
+      mesh.draw();
+      texture.unbind();
+    } else if (useMonochrome && grayscaleShaderLoaded_) {
+      // Monochrome filter using GLSL shader for true grayscale conversion
+      ofSetColor(255, 255, 255);  // Shader handles all color manipulation
+      grayscaleShader_.begin();
+      grayscaleShader_.setUniformTexture("tex0", texture, 0);
+      grayscaleShader_.setUniform1f("brightness", brightness);
+      grayscaleShader_.setUniform1f("alpha", alpha);
+      texture.bind();
+      mesh.draw();
+      texture.unbind();
+      grayscaleShader_.end();
+    } else if (useMonochrome) {
+      // Fallback monochrome without shader - use gray tint (less accurate)
+      const int grayValue = static_cast<int>(std::round(brightness * 200.0f));
+      ofSetColor(grayValue, grayValue, grayValue, alphaValue);
+      texture.bind();
+      mesh.draw();
+      texture.unbind();
     } else {
-      const int colorValue = static_cast<int>(std::round(brightness * 255.0f));
-      ofSetColor(colorValue, colorValue, colorValue, alphaValue);
-    }
-
-    auto& texture = player.getTexture();
-    if (texture.isAllocated()) {
+      // No filter - render video in full color (white tint preserves original colors)
+      // Brightness is applied uniformly to all channels
+      const int brightnessValue = static_cast<int>(std::round(brightness * 255.0f));
+      ofSetColor(brightnessValue, brightnessValue, brightnessValue, alphaValue);
       texture.bind();
       mesh.draw();
       texture.unbind();

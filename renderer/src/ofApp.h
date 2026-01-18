@@ -86,6 +86,8 @@ class ofApp : public ofBaseApp,
 
   // Monochrome filter with color tints and dramatic effects
   ofFbo monoFbo_{};
+  ofShader grayscaleShader_{};
+  bool grayscaleShaderLoaded_{false};
   bool monochromeEnabled_{true};
   bool colorTintEnabled_{true};
   bool dramaticModeEnabled_{true};  // High contrast dramatic look

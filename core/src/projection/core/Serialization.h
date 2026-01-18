@@ -37,6 +37,9 @@ void from_json(const nlohmann::json& j, Feed& feed);
 void to_json(nlohmann::json& j, const Surface& surface);
 void from_json(const nlohmann::json& j, Surface& surface);
 
+void to_json(nlohmann::json& j, const SceneSettings& settings);
+void from_json(const nlohmann::json& j, SceneSettings& settings);
+
 void to_json(nlohmann::json& j, const Scene& scene);
 void from_json(const nlohmann::json& j, Scene& scene);
 

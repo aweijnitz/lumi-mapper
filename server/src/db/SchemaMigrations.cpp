@@ -97,6 +97,11 @@ const char* kMigrationAddRotationColumn = R"SQL(
 ALTER TABLE surfaces ADD COLUMN rotation REAL NOT NULL DEFAULT 0;
 )SQL";
 
+// Migration: Add settings_json column to scenes table (defaults to empty object)
+const char* kMigrationAddSceneSettingsColumn = R"SQL(
+ALTER TABLE scenes ADD COLUMN settings_json TEXT NOT NULL DEFAULT '{}';
+)SQL";
+
 int getSchemaVersion(sqlite3* handle) {
     const char* sql = "SELECT version FROM schema_version LIMIT 1;";
     sqlite3_stmt* stmt = nullptr;
@@ -232,6 +237,21 @@ void SchemaMigrations::applyMigrations(SqliteConnection& connection) {
             }
         }
         setSchemaVersion(handle, 1);
+        currentVersion = 1;
+    }
+
+    // Migration 2: Add settings_json column to scenes table
+    if (currentVersion < 2) {
+        if (!columnExists(handle, "scenes", "settings_json")) {
+            char* errorMessage = nullptr;
+            int result = sqlite3_exec(handle, kMigrationAddSceneSettingsColumn, nullptr, nullptr, &errorMessage);
+            if (result != SQLITE_OK) {
+                std::string error = errorMessage ? errorMessage : "Unknown error";
+                sqlite3_free(errorMessage);
+                throw std::runtime_error("Failed to add settings_json column to scenes: " + error);
+            }
+        }
+        setSchemaVersion(handle, 2);
     }
 }
 

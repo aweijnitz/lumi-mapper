@@ -6,6 +6,9 @@
 #include <stdexcept>
 #include <string>
 
+#include <nlohmann/json.hpp>
+
+#include "projection/core/Serialization.h"
 #include "repo/SurfaceRepository.h"
 
 namespace projection::server::repo {
@@ -30,7 +33,12 @@ core::Scene SceneRepository::createScene(const core::Scene& scene) {
     }
 
     const std::string idValue = scene.getId().value.empty() ? generateId() : scene.getId().value;
-    const char* sql = "INSERT INTO scenes(project_id, id, name, description) VALUES(?, ?, ?, ?);";
+    const char* sql = "INSERT INTO scenes(project_id, id, name, description, settings_json) VALUES(?, ?, ?, ?, ?);";
+
+    // Serialize settings to JSON
+    nlohmann::json settingsJson;
+    core::to_json(settingsJson, scene.getSettings());
+    const std::string settingsJsonStr = settingsJson.dump();
 
     sqlite3_stmt* stmt = nullptr;
     int result = sqlite3_prepare_v2(handle, sql, -1, &stmt, nullptr);
@@ -57,10 +65,16 @@ core::Scene SceneRepository::createScene(const core::Scene& scene) {
         throw std::runtime_error("Failed to bind scene name: " + std::string(sqlite3_errmsg(handle)));
     }
 
-    result = sqlite3_bind_text(stmt, bindIndex, scene.getDescription().c_str(), -1, SQLITE_TRANSIENT);
+    result = sqlite3_bind_text(stmt, bindIndex++, scene.getDescription().c_str(), -1, SQLITE_TRANSIENT);
     if (result != SQLITE_OK) {
         sqlite3_finalize(stmt);
         throw std::runtime_error("Failed to bind scene description: " + std::string(sqlite3_errmsg(handle)));
+    }
+
+    result = sqlite3_bind_text(stmt, bindIndex, settingsJsonStr.c_str(), -1, SQLITE_TRANSIENT);
+    if (result != SQLITE_OK) {
+        sqlite3_finalize(stmt);
+        throw std::runtime_error("Failed to bind scene settings: " + std::string(sqlite3_errmsg(handle)));
     }
 
     result = sqlite3_step(stmt);
@@ -89,7 +103,7 @@ std::vector<core::Scene> SceneRepository::listScenes(const core::ProjectId& proj
         throw std::runtime_error("SQLite connection is not open");
     }
 
-    const char* sql = "SELECT id, name, description FROM scenes WHERE project_id=? ORDER BY id;";
+    const char* sql = "SELECT id, name, description, settings_json FROM scenes WHERE project_id=? ORDER BY id;";
 
     sqlite3_stmt* stmt = nullptr;
     int result = sqlite3_prepare_v2(handle, sql, -1, &stmt, nullptr);
@@ -108,12 +122,28 @@ std::vector<core::Scene> SceneRepository::listScenes(const core::ProjectId& proj
         const unsigned char* idText = sqlite3_column_text(stmt, 0);
         const unsigned char* nameText = sqlite3_column_text(stmt, 1);
         const unsigned char* descText = sqlite3_column_text(stmt, 2);
+        const unsigned char* settingsText = sqlite3_column_text(stmt, 3);
 
         std::string idString = idText ? reinterpret_cast<const char*>(idText) : "";
         std::string name = nameText ? reinterpret_cast<const char*>(nameText) : "";
         std::string description = descText ? reinterpret_cast<const char*>(descText) : "";
+        std::string settingsJsonStr = settingsText ? reinterpret_cast<const char*>(settingsText) : "{}";
 
-        scenes.emplace_back(core::Scene(projectId, core::SceneId(idString), name, description, {}));
+        core::Scene scene(projectId, core::SceneId(idString), name, description, {});
+
+        // Parse settings JSON
+        if (!settingsJsonStr.empty() && settingsJsonStr != "{}") {
+            try {
+                nlohmann::json settingsJson = nlohmann::json::parse(settingsJsonStr);
+                core::SceneSettings settings;
+                core::from_json(settingsJson, settings);
+                scene.setSettings(settings);
+            } catch (...) {
+                // Use defaults on parse error
+            }
+        }
+
+        scenes.emplace_back(std::move(scene));
     }
 
     if (result != SQLITE_DONE) {
@@ -139,7 +169,7 @@ std::optional<core::Scene> SceneRepository::findSceneById(const core::ProjectId&
         throw std::runtime_error("SQLite connection is not open");
     }
 
-    const char* sql = "SELECT id, name, description FROM scenes WHERE project_id = ? AND id = ? LIMIT 1;";
+    const char* sql = "SELECT id, name, description, settings_json FROM scenes WHERE project_id = ? AND id = ? LIMIT 1;";
     sqlite3_stmt* stmt = nullptr;
     int result = sqlite3_prepare_v2(handle, sql, -1, &stmt, nullptr);
     if (result != SQLITE_OK) {
@@ -162,13 +192,30 @@ std::optional<core::Scene> SceneRepository::findSceneById(const core::ProjectId&
     if (result == SQLITE_ROW) {
         const unsigned char* nameText = sqlite3_column_text(stmt, 1);
         const unsigned char* descText = sqlite3_column_text(stmt, 2);
+        const unsigned char* settingsText = sqlite3_column_text(stmt, 3);
 
         std::string name = nameText ? reinterpret_cast<const char*>(nameText) : "";
         std::string description = descText ? reinterpret_cast<const char*>(descText) : "";
+        std::string settingsJsonStr = settingsText ? reinterpret_cast<const char*>(settingsText) : "{}";
         sqlite3_finalize(stmt);
+
         repo::SurfaceRepository surfaceRepo(connection_);
         auto surfaces = surfaceRepo.listSurfacesForScene(projectId, sceneId);
-        return core::Scene(projectId, sceneId, name, description, surfaces);
+        core::Scene scene(projectId, sceneId, name, description, surfaces);
+
+        // Parse settings JSON
+        if (!settingsJsonStr.empty() && settingsJsonStr != "{}") {
+            try {
+                nlohmann::json settingsJson = nlohmann::json::parse(settingsJsonStr);
+                core::SceneSettings settings;
+                core::from_json(settingsJson, settings);
+                scene.setSettings(settings);
+            } catch (...) {
+                // Use defaults on parse error
+            }
+        }
+
+        return scene;
     }
 
     if (result != SQLITE_DONE) {
@@ -197,7 +244,12 @@ core::Scene SceneRepository::updateScene(const core::Scene& scene) {
         throw std::runtime_error("Scene project id must not be empty for update");
     }
 
-    const char* sql = "UPDATE scenes SET name=?, description=? WHERE project_id=? AND id=?;";
+    // Serialize settings to JSON
+    nlohmann::json settingsJson;
+    core::to_json(settingsJson, scene.getSettings());
+    const std::string settingsJsonStr = settingsJson.dump();
+
+    const char* sql = "UPDATE scenes SET name=?, description=?, settings_json=? WHERE project_id=? AND id=?;";
     sqlite3_stmt* stmt = nullptr;
     int result = sqlite3_prepare_v2(handle, sql, -1, &stmt, nullptr);
     if (result != SQLITE_OK) {
@@ -206,8 +258,9 @@ core::Scene SceneRepository::updateScene(const core::Scene& scene) {
 
     result = sqlite3_bind_text(stmt, 1, scene.getName().c_str(), -1, SQLITE_TRANSIENT);
     result |= sqlite3_bind_text(stmt, 2, scene.getDescription().c_str(), -1, SQLITE_TRANSIENT);
-    result |= sqlite3_bind_text(stmt, 3, scene.getProjectId().value.c_str(), -1, SQLITE_TRANSIENT);
-    result |= sqlite3_bind_text(stmt, 4, scene.getId().value.c_str(), -1, SQLITE_TRANSIENT);
+    result |= sqlite3_bind_text(stmt, 3, settingsJsonStr.c_str(), -1, SQLITE_TRANSIENT);
+    result |= sqlite3_bind_text(stmt, 4, scene.getProjectId().value.c_str(), -1, SQLITE_TRANSIENT);
+    result |= sqlite3_bind_text(stmt, 5, scene.getId().value.c_str(), -1, SQLITE_TRANSIENT);
     if (result != SQLITE_OK) {
         sqlite3_finalize(stmt);
         throw std::runtime_error("Failed to bind scene update fields: " + std::string(sqlite3_errmsg(handle)));

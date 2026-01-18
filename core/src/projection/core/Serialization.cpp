@@ -243,12 +243,46 @@ void from_json(const json& j, Surface& surface) {
   }
 }
 
+// SceneFilter enum string conversion
+std::string sceneFilterToString(SceneFilter filter) {
+  switch (filter) {
+    case SceneFilter::ColorTint: return "colorTint";
+    case SceneFilter::Monochrome: return "monochrome";
+    case SceneFilter::None:
+    default: return "none";
+  }
+}
+
+SceneFilter sceneFilterFromString(const std::string& str) {
+  if (str == "colorTint") return SceneFilter::ColorTint;
+  if (str == "monochrome") return SceneFilter::Monochrome;
+  return SceneFilter::None;
+}
+
+void to_json(json& j, const SceneSettings& settings) {
+  j = json{
+    {"filter", sceneFilterToString(settings.filter)},
+    {"colorPaletteIndex", settings.colorPaletteIndex}
+  };
+}
+
+void from_json(const json& j, SceneSettings& settings) {
+  settings = SceneSettings{};  // Start with defaults
+  if (j.contains("filter") && j["filter"].is_string()) {
+    settings.filter = sceneFilterFromString(j["filter"].get<std::string>());
+  }
+  if (j.contains("colorPaletteIndex") && j["colorPaletteIndex"].is_number_integer()) {
+    settings.colorPaletteIndex = j["colorPaletteIndex"].get<int>();
+  }
+}
+
 void to_json(json& j, const Scene& scene) {
   j = json{{"projectId", scene.getProjectId().value},
            {"id", scene.getId().value},
            {"name", scene.getName()},
            {"description", scene.getDescription()},
-           {"surfaces", scene.getSurfaces()}};
+           {"surfaces", scene.getSurfaces()},
+           {"settings", scene.getSettings()}};
 }
 
 void from_json(const json& j, Scene& scene) {
@@ -273,6 +307,13 @@ void from_json(const json& j, Scene& scene) {
   }
 
   scene = Scene(ProjectId{projectId}, SceneId{id}, name, description, surfaces);
+
+  // Parse optional settings (backwards compatible - defaults if missing)
+  if (j.contains("settings") && j["settings"].is_object()) {
+    SceneSettings settings;
+    from_json(j["settings"], settings);
+    scene.setSettings(settings);
+  }
 }
 
 void to_json(json& j, const Cue& cue) {
