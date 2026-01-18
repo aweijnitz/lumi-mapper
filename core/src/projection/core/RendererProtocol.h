@@ -24,7 +24,9 @@ enum class RendererMessageType {
   LoadScene,
   LoadSceneDefinition,
   SetFeedForSurface,
-  PlayCue
+  PlayCue,
+  ShowTestPattern,
+  ShowCrosshair
 };
 
 struct RendererMessageBase {
@@ -96,6 +98,22 @@ struct PlayCueMessage {
   bool operator==(const PlayCueMessage& other) const { return projectId == other.projectId && cueId == other.cueId; }
 };
 
+struct ShowTestPatternMessage {
+  bool enabled;
+
+  bool operator==(const ShowTestPatternMessage& other) const { return enabled == other.enabled; }
+};
+
+struct ShowCrosshairMessage {
+  bool enabled;      // false to hide crosshair
+  float x;           // normalized x coordinate (-1 to 1)
+  float y;           // normalized y coordinate (-1 to 1)
+
+  bool operator==(const ShowCrosshairMessage& other) const {
+    return enabled == other.enabled && x == other.x && y == other.y;
+  }
+};
+
 struct RendererMessage {
   RendererMessageType type;
   std::string commandId;
@@ -106,12 +124,15 @@ struct RendererMessage {
   std::optional<LoadSceneDefinitionMessage> loadSceneDefinition;
   std::optional<SetFeedForSurfaceMessage> setFeedForSurface;
   std::optional<PlayCueMessage> playCue;
+  std::optional<ShowTestPatternMessage> showTestPattern;
+  std::optional<ShowCrosshairMessage> showCrosshair;
 
   bool operator==(const RendererMessage& other) const {
     return type == other.type && commandId == other.commandId && hello == other.hello &&
            ack == other.ack && error == other.error && loadScene == other.loadScene &&
            loadSceneDefinition == other.loadSceneDefinition &&
-           setFeedForSurface == other.setFeedForSurface && playCue == other.playCue;
+           setFeedForSurface == other.setFeedForSurface && playCue == other.playCue &&
+           showTestPattern == other.showTestPattern && showCrosshair == other.showCrosshair;
   }
 };
 
@@ -139,6 +160,12 @@ void from_json(const nlohmann::json& j, SetFeedForSurfaceMessage& message);
 
 void to_json(nlohmann::json& j, const PlayCueMessage& message);
 void from_json(const nlohmann::json& j, PlayCueMessage& message);
+
+void to_json(nlohmann::json& j, const ShowTestPatternMessage& message);
+void from_json(const nlohmann::json& j, ShowTestPatternMessage& message);
+
+void to_json(nlohmann::json& j, const ShowCrosshairMessage& message);
+void from_json(const nlohmann::json& j, ShowCrosshairMessage& message);
 
 void to_json(nlohmann::json& j, const RendererMessage& message);
 void from_json(const nlohmann::json& j, RendererMessage& message);

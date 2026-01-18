@@ -823,6 +823,73 @@ void HttpServer::registerRoutes() {
         }
     });
 
+    // Toggle test pattern (calibration grid) on all connected renderers
+    registerPost("/renderer/testPattern", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+        if (!rendererRegistry_) {
+            respondWithError(res, 500, "Renderer registry not configured");
+            return;
+        }
+
+        try {
+            auto body = json::parse(req.body);
+            bool enabled = body.value("enabled", true);
+
+            core::RendererMessage message{};
+            message.type = core::RendererMessageType::ShowTestPattern;
+            message.commandId = generateCommandId();
+            message.showTestPattern = core::ShowTestPatternMessage{enabled};
+
+            size_t sentCount = rendererRegistry_->broadcastMessage(message);
+            if (sentCount == 0) {
+                respondWithError(res, 503, "No renderers connected");
+                return;
+            }
+            res.status = 200;
+            res.set_content(json({{"status", "sent"}, {"enabled", enabled}, {"renderers", sentCount}}).dump(),
+                            "application/json");
+        } catch (const json::exception& ex) {
+            respondWithError(res, 400, ex.what());
+        } catch (const std::exception& ex) {
+            respondWithError(res, 500, ex.what());
+        }
+    });
+
+    // Show/hide crosshair overlay on renderers (for vertex alignment during drag)
+    registerPost("/renderer/crosshair", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+        if (!rendererRegistry_) {
+            respondWithError(res, 500, "Renderer registry not configured");
+            return;
+        }
+
+        try {
+            auto body = json::parse(req.body);
+            bool enabled = body.value("enabled", false);
+            float x = body.value("x", 0.0f);
+            float y = body.value("y", 0.0f);
+
+            core::RendererMessage message{};
+            message.type = core::RendererMessageType::ShowCrosshair;
+            message.commandId = generateCommandId();
+            message.showCrosshair = core::ShowCrosshairMessage{enabled, x, y};
+
+            size_t sentCount = rendererRegistry_->broadcastMessage(message);
+            if (sentCount == 0) {
+                // Don't error on no renderers - crosshair is a nice-to-have
+                res.status = 200;
+                res.set_content(json({{"status", "no_renderers"}, {"enabled", enabled}}).dump(),
+                                "application/json");
+                return;
+            }
+            res.status = 200;
+            res.set_content(json({{"status", "sent"}, {"enabled", enabled}, {"x", x}, {"y", y}, {"renderers", sentCount}}).dump(),
+                            "application/json");
+        } catch (const json::exception& ex) {
+            respondWithError(res, 400, ex.what());
+        } catch (const std::exception& ex) {
+            respondWithError(res, 500, ex.what());
+        }
+    });
+
     registerPost("/demo/two-video-test", [this](const ::httplib::Request&, ::httplib::Response& res) {
         if (!rendererRegistry_) {
             respondWithError(res, 500, "Renderer registry not configured");

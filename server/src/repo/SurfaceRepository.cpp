@@ -26,7 +26,7 @@ core::Surface SurfaceRepository::createSurface(const core::Surface& surface, con
 
     const char* sql =
         "INSERT INTO surfaces(project_id, id, scene_id, name, feed_id, z_order, opacity, brightness, blend_mode, "
-        "vertices_json) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
+        "vertices_json, rotation) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
 
     sqlite3_stmt* stmt = nullptr;
     int result = sqlite3_prepare_v2(handle, sql, -1, &stmt, nullptr);
@@ -93,10 +93,16 @@ core::Surface SurfaceRepository::createSurface(const core::Surface& surface, con
         throw std::runtime_error("Failed to bind surface blend mode: " + std::string(sqlite3_errmsg(handle)));
     }
 
-    result = sqlite3_bind_text(stmt, bindIndex, verticesJsonStr.c_str(), -1, SQLITE_TRANSIENT);
+    result = sqlite3_bind_text(stmt, bindIndex++, verticesJsonStr.c_str(), -1, SQLITE_TRANSIENT);
     if (result != SQLITE_OK) {
         sqlite3_finalize(stmt);
         throw std::runtime_error("Failed to bind surface vertices: " + std::string(sqlite3_errmsg(handle)));
+    }
+
+    result = sqlite3_bind_double(stmt, bindIndex, surface.getRotation());
+    if (result != SQLITE_OK) {
+        sqlite3_finalize(stmt);
+        throw std::runtime_error("Failed to bind surface rotation: " + std::string(sqlite3_errmsg(handle)));
     }
 
     result = sqlite3_step(stmt);
@@ -118,7 +124,7 @@ std::vector<core::Surface> SurfaceRepository::listSurfacesForScene(const core::P
     }
 
     const char* sql =
-        "SELECT id, name, vertices_json, feed_id, opacity, brightness, blend_mode, z_order "
+        "SELECT id, name, vertices_json, feed_id, opacity, brightness, blend_mode, z_order, rotation "
         "FROM surfaces WHERE project_id = ? AND scene_id = ? ORDER BY z_order, id;";
 
     sqlite3_stmt* stmt = nullptr;
@@ -149,6 +155,7 @@ std::vector<core::Surface> SurfaceRepository::listSurfacesForScene(const core::P
         double brightness = sqlite3_column_double(stmt, 5);
         const unsigned char* blendModeText = sqlite3_column_text(stmt, 6);
         int zOrder = sqlite3_column_int(stmt, 7);
+        double rotation = sqlite3_column_double(stmt, 8);
 
         std::string id = idText ? reinterpret_cast<const char*>(idText) : "";
         std::string name = nameText ? reinterpret_cast<const char*>(nameText) : "";
@@ -165,9 +172,10 @@ std::vector<core::Surface> SurfaceRepository::listSurfacesForScene(const core::P
             throw std::runtime_error("Failed to parse blend mode for surface: " + blendModeStr);
         }
 
-        surfaces.emplace_back(core::Surface(core::SurfaceId{id}, name, vertices, core::FeedId{feedId},
-                                            static_cast<float>(opacity), static_cast<float>(brightness), blendMode,
-                                            zOrder));
+        core::Surface surface(core::SurfaceId{id}, name, vertices, core::FeedId{feedId},
+                              static_cast<float>(opacity), static_cast<float>(brightness), blendMode, zOrder);
+        surface.setRotation(static_cast<float>(rotation));
+        surfaces.emplace_back(std::move(surface));
     }
 
     if (result != SQLITE_DONE) {

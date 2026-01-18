@@ -11,6 +11,7 @@ export const useRendererStore = defineStore("renderer", {
     isLoading: false,
     error: null as string | null,
     lastStatus: null as RendererStatus | null,
+    testPatternEnabled: false,
   }),
   actions: {
     async ping() {
@@ -53,6 +54,35 @@ export const useRendererStore = defineStore("renderer", {
         throw error;
       } finally {
         this.isLoading = false;
+      }
+    },
+    async toggleTestPattern(enabled?: boolean) {
+      this.isLoading = true;
+      this.error = null;
+      const newState = enabled ?? !this.testPatternEnabled;
+      try {
+        await requestJson("/api/renderer/testPattern", {
+          method: "POST",
+          body: JSON.stringify({ enabled: newState }),
+        });
+        this.testPatternEnabled = newState;
+      } catch (error) {
+        this.error = resolveErrorMessage(error, "Failed to toggle test pattern.");
+        throw error;
+      } finally {
+        this.isLoading = false;
+      }
+    },
+    async showCrosshair(enabled: boolean, x = 0, y = 0) {
+      // Fire-and-forget: don't set loading state or track errors
+      // This is called frequently during drag so must be lightweight
+      try {
+        await requestJson("/api/renderer/crosshair", {
+          method: "POST",
+          body: JSON.stringify({ enabled, x, y }),
+        });
+      } catch {
+        // Silently ignore errors - crosshair is a nice-to-have
       }
     },
   },

@@ -20,6 +20,7 @@ const { feeds, activeFeed, error } = storeToRefs(feedStore);
 
 const name = ref("");
 const selectedAssetPath = ref("");
+const successMessage = ref("");
 
 const assetOptions = computed(() =>
   assetStore.assets.map((asset) => ({ label: asset.name, value: asset.path })),
@@ -53,6 +54,14 @@ const resolveFeedFilePath = (feed: Feed | null) => {
     return String((config as { filePath?: string }).filePath ?? "");
   }
   return "";
+};
+
+// Extract just the filename from a full path
+const getFileName = (feed: Feed) => {
+  const path = resolveFeedFilePath(feed);
+  if (!path) return "—";
+  const parts = path.split("/");
+  return parts[parts.length - 1] || "—";
 };
 
 const syncFormWithFeed = (feed: Feed | null) => {
@@ -93,12 +102,23 @@ const buildPayload = (feedId: string): Feed | null => {
   };
 };
 
+const showSuccess = (message: string) => {
+  successMessage.value = message;
+  setTimeout(() => {
+    successMessage.value = "";
+  }, 2000);
+};
+
 const createFeed = async () => {
   const payload = buildPayload(createId("feed"));
   if (!payload) {
     return;
   }
   await feedStore.createFeed(payload);
+  if (!feedStore.error) {
+    showSuccess("Feed created");
+    clearSelection();
+  }
 };
 
 const updateFeed = async () => {
@@ -111,6 +131,9 @@ const updateFeed = async () => {
   }
   payload.type = activeFeed.value.type;
   await feedStore.updateFeed(payload);
+  if (!feedStore.error) {
+    showSuccess("Feed updated");
+  }
 };
 
 const deleteFeed = async () => {
@@ -118,6 +141,9 @@ const deleteFeed = async () => {
     return;
   }
   await feedStore.deleteFeed(projectStore.activeProject.id, activeFeed.value.id);
+  if (!feedStore.error) {
+    showSuccess("Feed deleted");
+  }
   clearSelection();
 };
 </script>
@@ -130,29 +156,44 @@ const deleteFeed = async () => {
 
     <template v-else>
       <div class="feed-browser__form">
-        <InputText
-          v-model="name"
-          placeholder="Feed name"
-          data-testid="feed-name"
-        />
-        <Dropdown
-          v-model="selectedAssetPath"
-          :options="assetOptions"
-          optionLabel="label"
-          optionValue="value"
-          placeholder="Select asset"
-          appendTo="self"
-          data-testid="feed-asset"
-        />
+        <div v-if="activeFeed" class="feed-browser__editing">
+          <i class="pi pi-pencil"></i>
+          <span>Editing: <strong>{{ activeFeed.name }}</strong></span>
+        </div>
+        <div class="feed-browser__field">
+          <label class="feed-browser__label" for="feed-name" title="Display name for this feed">Feed Name</label>
+          <InputText
+            id="feed-name"
+            v-model="name"
+            placeholder="e.g., Main Video, Background Loop"
+            data-testid="feed-name"
+            title="Enter a descriptive name for this video feed"
+          />
+        </div>
+        <div class="feed-browser__field">
+          <label class="feed-browser__label" for="feed-asset" title="Video or image file to use">Source Asset</label>
+          <Dropdown
+            id="feed-asset"
+            v-model="selectedAssetPath"
+            :options="assetOptions"
+            optionLabel="label"
+            optionValue="value"
+            placeholder="Choose an uploaded asset"
+            appendTo="self"
+            data-testid="feed-asset"
+            title="Select a video or image from your uploaded assets"
+          />
+        </div>
       </div>
 
       <div class="feed-browser__actions">
         <Button
-          label="Create Feed"
+          label="Create"
           icon="pi pi-plus"
           :disabled="!canCreate"
           :loading="isBusy"
           data-testid="feed-create"
+          title="Create a new feed with the settings above"
           @click="createFeed"
         />
         <Button
@@ -161,21 +202,26 @@ const deleteFeed = async () => {
           :disabled="!canUpdate"
           :loading="isBusy"
           data-testid="feed-update"
+          title="Save changes to the selected feed"
           @click="updateFeed"
         />
         <Button
           label="Clear"
+          icon="pi pi-eraser"
           text
           :disabled="isBusy"
           data-testid="feed-clear"
+          title="Clear the form and deselect"
           @click="clearSelection"
         />
         <Button
           label="Delete"
+          icon="pi pi-trash"
           severity="danger"
           text
           :disabled="!activeFeed || isBusy"
           data-testid="feed-delete"
+          title="Permanently delete the selected feed"
           @click="deleteFeed"
         />
       </div>
@@ -183,6 +229,13 @@ const deleteFeed = async () => {
       <Message v-if="error" severity="error" class="feed-browser__message">
         {{ error }}
       </Message>
+
+      <Transition name="feed-browser__success">
+        <div v-if="successMessage" class="feed-browser__success">
+          <i class="pi pi-check-circle"></i>
+          {{ successMessage }}
+        </div>
+      </Transition>
 
       <DataTable
         :value="feeds"
@@ -193,8 +246,21 @@ const deleteFeed = async () => {
         class="feed-browser__table"
         size="small"
       >
-        <Column field="name" header="Feed" />
-        <Column field="type" header="Type" />
+        <Column field="name" header="Feed">
+          <template #body="{ data }">
+            <span class="feed-browser__name" :class="{ 'feed-browser__name--editing': activeFeed?.id === data.id }">
+              <i v-if="activeFeed?.id === data.id" class="pi pi-pencil feed-browser__edit-icon"></i>
+              {{ data.name }}
+            </span>
+          </template>
+        </Column>
+        <Column header="Source">
+          <template #body="{ data }">
+            <span class="feed-browser__source" :title="resolveFeedFilePath(data)">
+              {{ getFileName(data) }}
+            </span>
+          </template>
+        </Column>
       </DataTable>
     </template>
   </div>
@@ -204,26 +270,129 @@ const deleteFeed = async () => {
 .feed-browser {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 }
 
 .feed-browser__form {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   gap: 8px;
+}
+
+.feed-browser__editing {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: rgba(0, 180, 216, 0.1);
+  border: 1px solid rgba(0, 180, 216, 0.25);
+  border-radius: 2px;
+  font-size: 11px;
+  color: #888;
+}
+
+.feed-browser__editing i {
+  font-size: 10px;
+  color: #00b4d8;
+}
+
+.feed-browser__editing strong {
+  color: #00b4d8;
+  font-weight: 500;
+}
+
+.feed-browser__field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.feed-browser__label {
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #666;
+  cursor: help;
+  transition: color 0.12s ease;
+}
+
+.feed-browser__field:hover .feed-browser__label {
+  color: #888;
 }
 
 .feed-browser__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid #2a2a2a;
 }
 
 .feed-browser__empty {
-  color: #4a4640;
+  color: #555;
+  font-size: 12px;
+  padding: 12px 0;
+  text-align: center;
+  font-style: italic;
 }
 
 .feed-browser__message {
   margin: 0;
+}
+
+.feed-browser__table {
+  margin-top: 6px;
+}
+
+.feed-browser__name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.feed-browser__name--editing {
+  color: #00b4d8;
+}
+
+.feed-browser__edit-icon {
+  font-size: 10px;
+  color: #00b4d8;
+}
+
+.feed-browser__source {
+  color: #888;
+  font-size: 11px;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+}
+
+.feed-browser__success {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: rgba(52, 199, 89, 0.1);
+  border: 1px solid rgba(52, 199, 89, 0.25);
+  border-radius: 2px;
+  font-size: 11px;
+  color: #34c759;
+}
+
+.feed-browser__success i {
+  font-size: 12px;
+}
+
+.feed-browser__success-enter-active,
+.feed-browser__success-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.feed-browser__success-enter-from,
+.feed-browser__success-leave-to {
+  opacity: 0;
 }
 </style>

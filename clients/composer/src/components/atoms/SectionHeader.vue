@@ -13,19 +13,23 @@ defineProps<{ title: string; subtitle?: string }>();
 .section-header {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-bottom: 12px;
+  gap: 2px;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #2a2a2a;
 }
 
 .section-header__title {
-  font-size: 0.9rem;
+  font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.12em;
-  font-weight: 700;
+  letter-spacing: 0.06em;
+  font-weight: 500;
+  color: #888;
 }
 
 .section-header__subtitle {
-  color: #4a4640;
-  font-size: 0.85rem;
+  color: #555;
+  font-size: 10px;
+  line-height: 1.4;
 }
 </style>

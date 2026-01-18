@@ -171,24 +171,34 @@ const deleteScene = async () => {
 .scene-section {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 }
 
 .scene-section__form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 8px;
-  align-items: center;
+  gap: 6px;
+  align-items: start;
 }
 
 .scene-section__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
+  padding-top: 6px;
+  border-top: 1px solid #2a2a2a;
 }
 
 .scene-section__empty {
-  color: #4a4640;
+  color: #555;
+  font-size: 12px;
+  padding: 12px 0;
+  text-align: center;
+  font-style: italic;
+}
+
+.scene-section__message {
+  margin: 0;
 }
 </style>

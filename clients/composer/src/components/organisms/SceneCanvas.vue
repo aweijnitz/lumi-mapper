@@ -1,15 +1,18 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from "vue";
+import { computed, reactive, ref, watch, onMounted, onUnmounted, nextTick } from "vue";
 import { storeToRefs } from "pinia";
-import SpeedDial from "primevue/speeddial";
 import Message from "primevue/message";
+import Button from "primevue/button";
+import Menu from "primevue/menu";
 import { useSceneStore } from "../../stores/sceneStore";
 import { useFeedStore } from "../../stores/feedStore";
+import { useRendererStore } from "../../stores/rendererStore";
 import { createSurface, type SurfaceShape } from "../../composables/useSurfaceFactory";
 import type { Surface, Vec2 } from "../../types/surface";
 
 const sceneStore = useSceneStore();
 const feedStore = useFeedStore();
+const rendererStore = useRendererStore();
 const { activeScene, activeSurfaceId, error } = storeToRefs(sceneStore);
 
 const viewportRef = ref<HTMLDivElement | null>(null);
@@ -24,18 +27,32 @@ const panOriginY = ref(0);
 const panMoved = ref(false);
 const suppressClear = ref(false);
 const dragState = reactive<{
-  mode: "shape" | "vertex" | null;
+  mode: "shape" | "vertex" | "rotation" | null;
   surfaceId: string | null;
   vertexIndex: number | null;
   startPointer: Vec2 | null;
   startVertices: Vec2[];
+  startRotation: number;
+  startAngle: number;
 }>({
   mode: null,
   surfaceId: null,
   vertexIndex: null,
   startPointer: null,
   startVertices: [],
+  startRotation: 0,
+  startAngle: 0,
 });
+
+// Edge snapping configuration
+const snapEnabled = ref(true);
+const SNAP_THRESHOLD = 0.02; // Normalized distance threshold for snapping
+
+// Projector calibration grid overlay
+const showProjectorGrid = ref(false);
+
+// Spacebar modifier for panning (hold spacebar + drag to pan)
+const spacebarHeld = ref(false);
 
 const stageWidth = 1920;
 const stageHeight = 1080;
@@ -46,6 +63,204 @@ const canAddShape = computed(() => hasActiveScene.value && hasFeeds.value && !sc
 const activeSurface = computed(
   () => activeScene.value?.surfaces.find((surface) => surface.id === activeSurfaceId.value) ?? null,
 );
+
+// Get feed name for a surface
+const getFeedName = (feedId: string): string => {
+  const feed = feedStore.feeds.find((f) => f.id === feedId);
+  return feed?.name ?? "Unknown";
+};
+
+// Compute surface label info (center position and text)
+const getSurfaceLabelInfo = (surface: Surface) => {
+  const vertices = surface.vertices;
+  if (vertices.length === 0) return null;
+
+  // Compute centroid
+  const sum = vertices.reduce(
+    (acc, v) => ({ x: acc.x + v.x, y: acc.y + v.y }),
+    { x: 0, y: 0 }
+  );
+  const center = {
+    x: sum.x / vertices.length,
+    y: sum.y / vertices.length,
+  };
+
+  // Convert to stage coordinates
+  const stagePos = toStage(center.x, center.y);
+
+  return {
+    x: stagePos.x,
+    y: stagePos.y,
+    name: surface.name || getFeedName(surface.feedId),
+  };
+};
+
+const canPreview = computed(
+  () => Boolean(activeScene.value) && !rendererStore.isLoading,
+);
+
+const livePreview = ref(false);
+let previewDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+const previewScene = async () => {
+  if (!activeScene.value) {
+    return;
+  }
+  await rendererStore.loadScene(activeScene.value.projectId, activeScene.value.id);
+};
+
+// Debounced preview for live mode - prevents flooding the renderer
+const debouncedPreview = () => {
+  if (previewDebounceTimer) {
+    clearTimeout(previewDebounceTimer);
+  }
+  previewDebounceTimer = setTimeout(() => {
+    if (livePreview.value && canPreview.value) {
+      void previewScene();
+    }
+  }, 150);
+};
+
+// Watch for scene changes when live preview is enabled
+// Skip during vertex drag to avoid video flashing - scene updates on drag end
+watch(
+  () => activeScene.value?.surfaces,
+  () => {
+    if (livePreview.value && dragState.mode !== "vertex") {
+      debouncedPreview();
+    }
+  },
+  { deep: true },
+);
+
+// When live preview is enabled, immediately send the current scene to renderer
+// We check activeScene.value directly instead of canPreview to avoid blocking
+// on rendererStore.isLoading from unrelated operations like ping
+watch(
+  livePreview,
+  async (isLive) => {
+    if (isLive && activeScene.value) {
+      try {
+        await previewScene();
+      } catch {
+        // Error is already handled by the store
+      }
+    }
+  },
+  { flush: "post" },
+);
+
+// Keyboard shortcut handler
+const handleKeyDown = (event: KeyboardEvent) => {
+  // Track spacebar for pan modifier (works even in input fields)
+  if (event.code === "Space" && !event.repeat) {
+    spacebarHeld.value = true;
+  }
+
+  const target = event.target as HTMLElement;
+  const isInputField = target.tagName === "INPUT" || target.tagName === "TEXTAREA";
+
+  // Ctrl/Cmd + P to toggle live preview
+  if ((event.ctrlKey || event.metaKey) && event.key === "p") {
+    event.preventDefault();
+    if (canPreview.value) {
+      livePreview.value = !livePreview.value;
+    }
+    return;
+  }
+
+  // Skip shortcuts when focused on input fields
+  if (isInputField) return;
+
+  // Prevent spacebar from scrolling the page when used as pan modifier
+  if (event.code === "Space") {
+    event.preventDefault();
+  }
+
+  // F to fit to view
+  if (event.key === "f" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    event.preventDefault();
+    fitToView();
+  }
+  // 0 (zero) to reset zoom to 100%
+  if (event.key === "0" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    event.preventDefault();
+    zoom.value = 1;
+    centerViewport();
+  }
+  // Delete or Backspace to delete selected surface
+  if ((event.key === "Delete" || event.key === "Backspace") && activeSurfaceId.value) {
+    event.preventDefault();
+    void deleteSurface();
+  }
+  // Ctrl/Cmd + D to duplicate selected surface
+  if ((event.ctrlKey || event.metaKey) && event.key === "d" && activeSurface.value) {
+    event.preventDefault();
+    void duplicateSurface();
+  }
+};
+
+// Track spacebar release
+const handleKeyUp = (event: KeyboardEvent) => {
+  if (event.code === "Space") {
+    spacebarHeld.value = false;
+  }
+};
+
+// Center the stage in the viewport
+const centerViewport = () => {
+  if (!viewportRef.value) return;
+  const rect = viewportRef.value.getBoundingClientRect();
+  const scaledWidth = stageWidth * zoom.value;
+  const scaledHeight = stageHeight * zoom.value;
+  panX.value = (rect.width - scaledWidth) / 2;
+  panY.value = (rect.height - scaledHeight) / 2;
+};
+
+// Fit stage to viewport with padding
+const fitToView = () => {
+  if (!viewportRef.value) return;
+  const rect = viewportRef.value.getBoundingClientRect();
+  const padding = 40; // Padding around the stage
+  const availableWidth = rect.width - padding * 2;
+  const availableHeight = rect.height - padding * 2;
+  const scaleX = availableWidth / stageWidth;
+  const scaleY = availableHeight / stageHeight;
+  zoom.value = Math.min(scaleX, scaleY, 1); // Cap at 100%
+  centerViewport();
+};
+
+onMounted(() => {
+  window.addEventListener("keydown", handleKeyDown);
+  window.addEventListener("keyup", handleKeyUp);
+  // Center viewport after DOM is fully ready - use multiple attempts for reliability
+  const attemptCenter = (attempts = 0) => {
+    if (!viewportRef.value) {
+      if (attempts < 10) {
+        requestAnimationFrame(() => attemptCenter(attempts + 1));
+      }
+      return;
+    }
+    const rect = viewportRef.value.getBoundingClientRect();
+    // Wait until viewport has dimensions
+    if (rect.width === 0 || rect.height === 0) {
+      if (attempts < 10) {
+        requestAnimationFrame(() => attemptCenter(attempts + 1));
+      }
+      return;
+    }
+    centerViewport();
+  };
+  requestAnimationFrame(() => attemptCenter());
+});
+
+onUnmounted(() => {
+  window.removeEventListener("keydown", handleKeyDown);
+  window.removeEventListener("keyup", handleKeyUp);
+  if (previewDebounceTimer) {
+    clearTimeout(previewDebounceTimer);
+  }
+});
 
 const resolveFeedId = () =>
   feedStore.activeFeed?.id ?? feedStore.feeds[0]?.id ?? "";
@@ -76,21 +291,114 @@ const addSurface = async (shape: SurfaceShape) => {
   sceneStore.setActiveSurfaceId(newSurface.id);
 };
 
-const shapeActions = computed(() => [
+const addMenuRef = ref<InstanceType<typeof Menu> | null>(null);
+
+const shapeMenuItems = computed(() => [
   {
-    label: "Add Rectangle",
+    label: "Rectangle",
     icon: "pi pi-stop",
     command: () => addSurface("rectangle"),
   },
   {
-    label: "Add Quad",
+    label: "Quad",
     icon: "pi pi-clone",
     command: () => addSurface("quad"),
   },
+  {
+    label: "Circle",
+    icon: "pi pi-circle",
+    command: () => addSurface("circle"),
+  },
 ]);
+
+const toggleAddMenu = (event: Event) => {
+  addMenuRef.value?.toggle(event);
+};
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
+
+// Get all vertices from all surfaces except the current one (for vertex snapping)
+const getOtherSurfaceVertices = (excludeSurfaceId: string): Vec2[] => {
+  if (!activeScene.value) return [];
+  const vertices: Vec2[] = [];
+  for (const surface of activeScene.value.surfaces) {
+    if (surface.id === excludeSurfaceId) continue;
+    vertices.push(...surface.vertices);
+  }
+  return vertices;
+};
+
+// Get all edges from all surfaces except the current one (for edge snapping)
+const getOtherSurfaceEdges = (excludeSurfaceId: string) => {
+  if (!activeScene.value) return [];
+  const edges: { p1: Vec2; p2: Vec2 }[] = [];
+  for (const surface of activeScene.value.surfaces) {
+    if (surface.id === excludeSurfaceId) continue;
+    const verts = surface.vertices;
+    for (let i = 0; i < verts.length; i++) {
+      edges.push({
+        p1: verts[i],
+        p2: verts[(i + 1) % verts.length],
+      });
+    }
+  }
+  return edges;
+};
+
+// Find the closest point on an edge to a given point
+const closestPointOnEdge = (p: Vec2, edge: { p1: Vec2; p2: Vec2 }): Vec2 => {
+  const dx = edge.p2.x - edge.p1.x;
+  const dy = edge.p2.y - edge.p1.y;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return edge.p1;
+
+  const t = clamp(((p.x - edge.p1.x) * dx + (p.y - edge.p1.y) * dy) / lenSq, 0, 1);
+  return {
+    x: edge.p1.x + t * dx,
+    y: edge.p1.y + t * dy,
+  };
+};
+
+// Apply snapping to a vertex position (vertices take priority over edges)
+const snapVertex = (vertex: Vec2, surfaceId: string): Vec2 => {
+  if (!snapEnabled.value) return vertex;
+
+  let snappedVertex = vertex;
+  let minDist = SNAP_THRESHOLD;
+
+  // First, try to snap to other vertices (higher priority)
+  const otherVertices = getOtherSurfaceVertices(surfaceId);
+  for (const otherVertex of otherVertices) {
+    const dist = Math.sqrt(
+      (vertex.x - otherVertex.x) ** 2 + (vertex.y - otherVertex.y) ** 2
+    );
+    if (dist < minDist) {
+      minDist = dist;
+      snappedVertex = { x: otherVertex.x, y: otherVertex.y };
+    }
+  }
+
+  // If we found a vertex snap, use it (don't check edges)
+  if (snappedVertex !== vertex) {
+    return snappedVertex;
+  }
+
+  // Otherwise, try to snap to edges
+  const edges = getOtherSurfaceEdges(surfaceId);
+  for (const edge of edges) {
+    const closest = closestPointOnEdge(vertex, edge);
+    const dist = Math.sqrt(
+      (vertex.x - closest.x) ** 2 + (vertex.y - closest.y) ** 2
+    );
+    if (dist < minDist) {
+      minDist = dist;
+      snappedVertex = closest;
+    }
+  }
+
+  return snappedVertex;
+};
 
 const clientToStage = (event: PointerEvent | WheelEvent) => {
   if (!viewportRef.value) {
@@ -115,9 +423,11 @@ const onWheel = (event: WheelEvent) => {
     return;
   }
 
-  const direction = event.deltaY > 0 ? -1 : 1;
-  const nextZoom = clamp(zoom.value + direction * 0.05, 0.1, 2);
-  if (nextZoom === zoom.value) {
+  // Use multiplicative zoom for smoother feel (1.08 = 8% per step)
+  const zoomFactor = 1.08;
+  const direction = event.deltaY > 0 ? 1 / zoomFactor : zoomFactor;
+  const nextZoom = clamp(zoom.value * direction, 0.1, 2);
+  if (Math.abs(nextZoom - zoom.value) < 0.001) {
     return;
   }
 
@@ -137,6 +447,14 @@ const startPan = (event: PointerEvent) => {
   }
   if (event.button !== 0) {
     return;
+  }
+  // When spacebar is held, allow panning from anywhere (ignore interactive elements check)
+  if (!spacebarHeld.value) {
+    // Don't start panning if we clicked on an interactive element (handle, surface, etc.)
+    const target = event.target as Element;
+    if (target.closest('.scene-canvas__rotation-handle, .scene-canvas__rotation-icon, .scene-canvas__handle, .scene-canvas__surface')) {
+      return;
+    }
   }
   isPanning.value = true;
   panMoved.value = false;
@@ -182,6 +500,11 @@ const startShapeDrag = (surface: Surface, event: PointerEvent) => {
   if (event.button !== 0) {
     return;
   }
+  // If spacebar is held, pan instead of dragging the surface
+  if (spacebarHeld.value) {
+    startPan(event);
+    return;
+  }
   event.preventDefault();
   suppressClear.value = true;
   dragState.mode = "shape";
@@ -197,6 +520,11 @@ const startVertexDrag = (surface: Surface, index: number, event: PointerEvent) =
   if (event.button !== 0) {
     return;
   }
+  // If spacebar is held, pan instead of dragging the vertex
+  if (spacebarHeld.value) {
+    startPan(event);
+    return;
+  }
   event.preventDefault();
   suppressClear.value = true;
   dragState.mode = "vertex";
@@ -208,38 +536,172 @@ const startVertexDrag = (surface: Surface, index: number, event: PointerEvent) =
   viewportRef.value?.setPointerCapture(event.pointerId);
 };
 
+// Calculate normalized center of a surface
+const getSurfaceCenterNorm = (surface: Surface): Vec2 => {
+  const vertices = surface.vertices;
+  const sumX = vertices.reduce((acc, v) => acc + v.x, 0);
+  const sumY = vertices.reduce((acc, v) => acc + v.y, 0);
+  return {
+    x: sumX / vertices.length,
+    y: sumY / vertices.length,
+  };
+};
+
+const startRotationDrag = (surface: Surface, event: PointerEvent) => {
+  if (event.button !== 0) {
+    return;
+  }
+  // If spacebar is held, pan instead of rotating
+  if (spacebarHeld.value) {
+    startPan(event);
+    return;
+  }
+  event.preventDefault();
+  suppressClear.value = true;
+
+  const center = getSurfaceCenterNorm(surface);
+  const pointerPos = clientToNormalized(event);
+  const startAngle = Math.atan2(pointerPos.y - center.y, pointerPos.x - center.x);
+
+  dragState.mode = "rotation";
+  dragState.surfaceId = surface.id;
+  dragState.vertexIndex = null;
+  dragState.startPointer = pointerPos;
+  dragState.startVertices = surface.vertices.map((vertex) => ({ ...vertex }));
+  dragState.startRotation = surface.rotation;
+  dragState.startAngle = startAngle;
+
+  sceneStore.setActiveSurfaceId(surface.id);
+  viewportRef.value?.setPointerCapture(event.pointerId);
+};
+
 const moveDrag = (event: PointerEvent) => {
   if (!dragState.mode || !dragState.surfaceId || !dragState.startPointer) {
     return;
   }
+
+  const surface = findSurface(dragState.surfaceId);
+  if (!surface) return;
+
+  if (dragState.mode === "rotation") {
+    // Calculate rotation based on angle change from center
+    const center = getSurfaceCenterNorm({ vertices: dragState.startVertices } as Surface);
+    const pointerPos = clientToNormalized(event);
+    const currentAngle = Math.atan2(pointerPos.y - center.y, pointerPos.x - center.x);
+    // Dragging clockwise should rotate content clockwise
+    const angleDelta = (currentAngle - dragState.startAngle) * (180 / Math.PI);
+
+    // Update surface rotation value
+    surface.rotation = dragState.startRotation + angleDelta;
+    return;
+  }
+
   const current = clientToNormalized(event);
-  const delta = {
+  let delta = {
     x: current.x - dragState.startPointer.x,
     y: current.y - dragState.startPointer.y,
   };
 
+  // Shift: Constrain proportions (equal movement in X and Y for uniform scaling feel)
+  if (event.shiftKey && dragState.mode === "vertex") {
+    const maxDelta = Math.max(Math.abs(delta.x), Math.abs(delta.y));
+    delta = {
+      x: Math.sign(delta.x) * maxDelta,
+      y: Math.sign(delta.y) * maxDelta,
+    };
+  }
+
+  // Alt: Scale from center (move vertex and its opposite symmetrically)
+  const scaleFromCenter = event.altKey && dragState.mode === "vertex" && dragState.vertexIndex !== null;
+
+  // Calculate center of original shape for center-scaling
+  const originalCenter = scaleFromCenter ? {
+    x: dragState.startVertices.reduce((sum, v) => sum + v.x, 0) / dragState.startVertices.length,
+    y: dragState.startVertices.reduce((sum, v) => sum + v.y, 0) / dragState.startVertices.length,
+  } : null;
+
   const nextVertices = dragState.startVertices.map((vertex, index) => {
-    if (dragState.mode === "vertex" && dragState.vertexIndex !== index) {
-      return vertex;
+    if (dragState.mode === "vertex") {
+      if (scaleFromCenter && originalCenter) {
+        // Scale all vertices from center based on the dragged vertex movement
+        const draggedVertex = dragState.startVertices[dragState.vertexIndex!];
+        const originalDistFromCenter = {
+          x: draggedVertex.x - originalCenter.x,
+          y: draggedVertex.y - originalCenter.y,
+        };
+        // Calculate scale factor based on new position relative to center
+        const newDraggedPos = {
+          x: draggedVertex.x + delta.x,
+          y: draggedVertex.y + delta.y,
+        };
+        const newDistFromCenter = {
+          x: newDraggedPos.x - originalCenter.x,
+          y: newDraggedPos.y - originalCenter.y,
+        };
+        // Avoid division by zero
+        const scaleX = Math.abs(originalDistFromCenter.x) > 0.001
+          ? newDistFromCenter.x / originalDistFromCenter.x
+          : 1;
+        const scaleY = Math.abs(originalDistFromCenter.y) > 0.001
+          ? newDistFromCenter.y / originalDistFromCenter.y
+          : 1;
+        // Use uniform scale if Shift is also held
+        const scale = event.shiftKey ? Math.max(scaleX, scaleY) : { x: scaleX, y: scaleY };
+        const uniformScale = typeof scale === "number";
+
+        return {
+          x: clamp(originalCenter.x + (vertex.x - originalCenter.x) * (uniformScale ? scale : scale.x), -1, 1),
+          y: clamp(originalCenter.y + (vertex.y - originalCenter.y) * (uniformScale ? scale : scale.y), -1, 1),
+        };
+      } else if (dragState.vertexIndex !== index) {
+        return vertex;
+      }
     }
-    return {
+    const newVertex = {
       x: clamp(vertex.x + delta.x, -1, 1),
       y: clamp(vertex.y + delta.y, -1, 1),
     };
+    // Apply snapping only for single vertex drags (not when scaling from center)
+    if (dragState.mode === "vertex" && !scaleFromCenter) {
+      return snapVertex(newVertex, dragState.surfaceId!);
+    }
+    return newVertex;
   });
 
   updateSurfaceVertices(dragState.surfaceId, nextVertices);
+
+  // Send crosshair position to renderer during vertex drag
+  if (dragState.mode === "vertex" && dragState.vertexIndex !== null) {
+    const vertexPos = nextVertices[dragState.vertexIndex];
+    if (vertexPos) {
+      void rendererStore.showCrosshair(true, vertexPos.x, vertexPos.y);
+    }
+  }
 };
 
 const endDrag = async () => {
+  // Hide crosshair on renderer when vertex drag ends
+  const wasVertexDrag = dragState.mode === "vertex";
+  if (wasVertexDrag) {
+    void rendererStore.showCrosshair(false);
+  }
+
   if (dragState.mode && activeScene.value) {
     await sceneStore.updateScene({ ...activeScene.value });
   }
   dragState.mode = null;
+
+  // After vertex drag, send scene to renderer immediately if live preview is on
+  // (we skip updates during drag to avoid video flashing)
+  if (wasVertexDrag && livePreview.value && canPreview.value) {
+    void previewScene();
+  }
   dragState.surfaceId = null;
   dragState.vertexIndex = null;
   dragState.startPointer = null;
   dragState.startVertices = [];
+  dragState.startRotation = 0;
+  dragState.startAngle = 0;
 };
 
 const clearSelection = () => {
@@ -270,24 +732,177 @@ const toPoint = (x: number, y: number) => {
 
 const surfacePoints = (shape: { vertices: { x: number; y: number }[] }) =>
   shape.vertices.map((vertex) => toPoint(vertex.x, vertex.y)).join(" ");
+
+// Compute center of the active surface for center point indicator
+const surfaceCenter = computed(() => {
+  if (!activeSurface.value) {
+    return null;
+  }
+  const vertices = activeSurface.value.vertices;
+  const sumX = vertices.reduce((acc, v) => acc + v.x, 0);
+  const sumY = vertices.reduce((acc, v) => acc + v.y, 0);
+  const centerNorm = {
+    x: sumX / vertices.length,
+    y: sumY / vertices.length,
+  };
+  return toStage(centerNorm.x, centerNorm.y);
+});
+
+// Compute rotation handle position (extends from center)
+const rotationHandleOffset = 90; // Distance from center in stage pixels
+const rotationHandle = computed(() => {
+  if (!activeSurface.value || !surfaceCenter.value) {
+    return null;
+  }
+  // Handle extends upward from center, rotated by current rotation
+  const angleRad = (activeSurface.value.rotation * Math.PI) / 180;
+  // Rotate from "up" (-90 degrees) by the surface rotation
+  const handleAngle = -Math.PI / 2 + angleRad;
+  return {
+    x: surfaceCenter.value.x + Math.cos(handleAngle) * rotationHandleOffset,
+    y: surfaceCenter.value.y + Math.sin(handleAngle) * rotationHandleOffset,
+  };
+});
+
+// Compute the dragged vertex position for the crosshair indicator
+const draggedVertexPosition = computed(() => {
+  if (dragState.mode !== "vertex" || dragState.vertexIndex === null || !dragState.surfaceId) {
+    return null;
+  }
+  const surface = findSurface(dragState.surfaceId);
+  if (!surface || dragState.vertexIndex >= surface.vertices.length) {
+    return null;
+  }
+  const vertex = surface.vertices[dragState.vertexIndex];
+  return toStage(vertex.x, vertex.y);
+});
+
+// Delete the active surface
+const deleteSurface = async () => {
+  if (!activeScene.value || !activeSurfaceId.value) {
+    return;
+  }
+  const nextSurfaces = activeScene.value.surfaces.filter(
+    (s) => s.id !== activeSurfaceId.value
+  );
+  const nextScene = {
+    ...activeScene.value,
+    surfaces: nextSurfaces,
+  };
+  await sceneStore.updateScene(nextScene);
+  sceneStore.setActiveSurfaceId(null);
+};
+
+// Duplicate the active surface
+const duplicateSurface = async () => {
+  if (!activeScene.value || !activeSurface.value) {
+    return;
+  }
+  const offset = 0.05; // Small offset so it's visible
+  const newSurface = createSurface("quad", {
+    feedId: activeSurface.value.feedId,
+    zOrder: activeScene.value.surfaces.length,
+    index: activeScene.value.surfaces.length + 1,
+  });
+  // Copy vertices with offset
+  newSurface.vertices = activeSurface.value.vertices.map((v) => ({
+    x: clamp(v.x + offset, -1, 1),
+    y: clamp(v.y + offset, -1, 1),
+  }));
+  newSurface.name = `${activeSurface.value.name} Copy`;
+  newSurface.opacity = activeSurface.value.opacity;
+  newSurface.brightness = activeSurface.value.brightness;
+  newSurface.blendMode = activeSurface.value.blendMode;
+  newSurface.rotation = activeSurface.value.rotation;
+
+  const nextScene = {
+    ...activeScene.value,
+    surfaces: [...activeScene.value.surfaces, newSurface],
+  };
+  await sceneStore.updateScene(nextScene);
+  sceneStore.setActiveSurfaceId(newSurface.id);
+};
+
 </script>
 
 <template>
   <div class="scene-canvas">
     <div class="scene-canvas__header">
-      <div class="scene-canvas__title">Scene Canvas</div>
-      <div class="scene-canvas__meta" data-testid="zoom-label">Zoom: {{ zoomLabel }}</div>
+      <div class="scene-canvas__title">Output Preview</div>
+      <div class="scene-canvas__controls">
+        <label
+          v-if="hasActiveScene"
+          class="scene-canvas__toggle"
+          :class="{ 'scene-canvas__toggle--active': livePreview, 'scene-canvas__toggle--disabled': !canPreview }"
+          title="Live preview - sync scene to renderer in real-time (Ctrl/Cmd+P)"
+        >
+          <input type="checkbox" v-model="livePreview" :disabled="!canPreview" />
+          <span class="scene-canvas__toggle-track">
+            <span class="scene-canvas__toggle-thumb"></span>
+          </span>
+          <span class="scene-canvas__toggle-label">Live Preview</span>
+        </label>
+        <label
+          class="scene-canvas__toggle scene-canvas__toggle--cyan"
+          :class="{ 'scene-canvas__toggle--active': showProjectorGrid }"
+          title="Show projector calibration grid"
+        >
+          <input type="checkbox" v-model="showProjectorGrid" />
+          <span class="scene-canvas__toggle-track">
+            <span class="scene-canvas__toggle-thumb"></span>
+          </span>
+          <span class="scene-canvas__toggle-label">Grid</span>
+        </label>
+        <label
+          v-if="hasActiveScene"
+          class="scene-canvas__toggle scene-canvas__toggle--cyan"
+          :class="{ 'scene-canvas__toggle--active': snapEnabled }"
+          title="Toggle vertex and edge snapping"
+        >
+          <input type="checkbox" v-model="snapEnabled" />
+          <span class="scene-canvas__toggle-track">
+            <span class="scene-canvas__toggle-thumb"></span>
+          </span>
+          <span class="scene-canvas__toggle-label">Snap</span>
+        </label>
+        <div class="scene-canvas__zoom-controls">
+          <span class="scene-canvas__zoom-value" data-testid="zoom-label" @click="zoom = 1" title="Click to reset to 100%">{{ zoomLabel }}</span>
+          <input
+            type="range"
+            class="scene-canvas__zoom-slider"
+            :value="zoom"
+            min="0.1"
+            max="2"
+            step="0.05"
+            title="Drag to zoom (scroll wheel also works)"
+            @input="zoom = parseFloat(($event.target as HTMLInputElement).value)"
+          />
+          <Button
+            icon="pi pi-expand"
+            label="Fit"
+            text
+            size="small"
+            class="scene-canvas__zoom-btn"
+            title="Fit to view (F)"
+            @click="fitToView"
+          />
+        </div>
+      </div>
     </div>
 
     <div v-if="!hasActiveScene" class="scene-canvas__empty">
-      Select or create a scene to start mapping surfaces.
+      <i class="pi pi-images scene-canvas__empty-icon"></i>
+      <p>No scene selected</p>
+      <span class="scene-canvas__empty-hint">Select or create a scene from the Browser panel to start mapping surfaces.</span>
     </div>
 
     <div v-else class="scene-canvas__workspace">
       <div
         ref="viewportRef"
         class="scene-canvas__viewport"
+        :class="{ 'scene-canvas__viewport--pan-mode': spacebarHeld }"
         data-testid="scene-viewport"
+        :title="spacebarHeld ? 'Pan mode: drag to pan the viewport' : 'Left-click to select surface, drag to move, scroll to zoom. Hold Space + drag to pan'"
         @wheel.prevent="onWheel"
         @pointerdown="startPan"
         @pointermove="
@@ -326,6 +941,101 @@ const surfacePoints = (shape: { vertices: { x: number; y: number }[] }) =>
             viewBox="0 0 1920 1080"
             role="presentation"
           >
+            <!-- Output boundary frame -->
+            <rect
+              class="scene-canvas__boundary"
+              x="0"
+              y="0"
+              :width="stageWidth"
+              :height="stageHeight"
+            />
+            <!-- Corner markers -->
+            <g class="scene-canvas__boundary-corners">
+              <!-- Top-left -->
+              <path d="M 0 40 L 0 0 L 40 0" />
+              <!-- Top-right -->
+              <path :d="`M ${stageWidth - 40} 0 L ${stageWidth} 0 L ${stageWidth} 40`" />
+              <!-- Bottom-left -->
+              <path :d="`M 0 ${stageHeight - 40} L 0 ${stageHeight} L 40 ${stageHeight}`" />
+              <!-- Bottom-right -->
+              <path :d="`M ${stageWidth - 40} ${stageHeight} L ${stageWidth} ${stageHeight} L ${stageWidth} ${stageHeight - 40}`" />
+            </g>
+            <!-- Center crosshair -->
+            <g class="scene-canvas__boundary-center">
+              <line :x1="stageWidth / 2 - 30" :y1="stageHeight / 2" :x2="stageWidth / 2 + 30" :y2="stageHeight / 2" />
+              <line :x1="stageWidth / 2" :y1="stageHeight / 2 - 30" :x2="stageWidth / 2" :y2="stageHeight / 2 + 30" />
+              <circle :cx="stageWidth / 2" :cy="stageHeight / 2" r="8" />
+            </g>
+
+            <!-- Projector calibration grid overlay -->
+            <g v-if="showProjectorGrid" class="scene-canvas__projector-grid">
+              <!-- Main boundary -->
+              <rect
+                class="scene-canvas__projector-boundary"
+                x="1"
+                y="1"
+                :width="stageWidth - 2"
+                :height="stageHeight - 2"
+              />
+              <!-- Vertical grid lines -->
+              <line
+                v-for="i in 15"
+                :key="`v-${i}`"
+                class="scene-canvas__projector-line"
+                :x1="(stageWidth / 16) * i"
+                y1="0"
+                :x2="(stageWidth / 16) * i"
+                :y2="stageHeight"
+              />
+              <!-- Horizontal grid lines -->
+              <line
+                v-for="i in 8"
+                :key="`h-${i}`"
+                class="scene-canvas__projector-line"
+                x1="0"
+                :y1="(stageHeight / 9) * i"
+                :x2="stageWidth"
+                :y2="(stageHeight / 9) * i"
+              />
+              <!-- Center crosshair -->
+              <line
+                class="scene-canvas__projector-center"
+                :x1="stageWidth / 2"
+                y1="0"
+                :x2="stageWidth / 2"
+                :y2="stageHeight"
+              />
+              <line
+                class="scene-canvas__projector-center"
+                x1="0"
+                :y1="stageHeight / 2"
+                :x2="stageWidth"
+                :y2="stageHeight / 2"
+              />
+              <!-- Diagonal lines for alignment -->
+              <line
+                class="scene-canvas__projector-diagonal"
+                x1="0"
+                y1="0"
+                :x2="stageWidth"
+                :y2="stageHeight"
+              />
+              <line
+                class="scene-canvas__projector-diagonal"
+                :x1="stageWidth"
+                y1="0"
+                x2="0"
+                :y2="stageHeight"
+              />
+              <!-- Resolution label -->
+              <text
+                class="scene-canvas__projector-label"
+                :x="stageWidth / 2"
+                y="40"
+                text-anchor="middle"
+              >CALIBRATION GRID • 1920×1080</text>
+            </g>
+
             <polygon
               v-for="surface in activeScene?.surfaces ?? []"
               :key="surface.id"
@@ -335,34 +1045,153 @@ const surfacePoints = (shape: { vertices: { x: number; y: number }[] }) =>
               :class="{ 'scene-canvas__surface--active': surface.id === activeSurfaceId }"
               @click.stop="selectSurface(surface.id)"
               @pointerdown.stop="startShapeDrag(surface, $event)"
-            />
+            >
+              <title>{{ surface.name || 'Surface' }} - Click to select, drag to move</title>
+            </polygon>
+
+            <!-- Surface labels (shown at center of each surface) -->
+            <text
+              v-for="surface in activeScene?.surfaces ?? []"
+              :key="`label-${surface.id}`"
+              class="scene-canvas__surface-label"
+              :class="{ 'scene-canvas__surface-label--active': surface.id === activeSurfaceId }"
+              :x="getSurfaceLabelInfo(surface)?.x"
+              :y="getSurfaceLabelInfo(surface)?.y"
+              text-anchor="middle"
+              dominant-baseline="central"
+              @click.stop="selectSurface(surface.id)"
+              @pointerdown.stop="startShapeDrag(surface, $event)"
+            >{{ getSurfaceLabelInfo(surface)?.name }}</text>
+
             <circle
               v-for="(vertex, index) in activeSurface?.vertices ?? []"
               :key="`handle-${index}`"
               class="scene-canvas__handle"
               :cx="toStage(vertex.x, vertex.y).x"
               :cy="toStage(vertex.x, vertex.y).y"
-              r="10"
+              r="18"
               @pointerdown.stop="startVertexDrag(activeSurface, index, $event)"
               @click.stop
-            />
+            >
+              <title>Corner {{ index + 1 }} - Drag to adjust</title>
+            </circle>
+
+            <!-- Rotation handle for selected surface -->
+            <g v-if="activeSurface && surfaceCenter && rotationHandle">
+              <!-- Line from center to rotation handle -->
+              <line
+                class="scene-canvas__rotation-line"
+                :x1="surfaceCenter.x"
+                :y1="surfaceCenter.y"
+                :x2="rotationHandle.x"
+                :y2="rotationHandle.y"
+              />
+              <!-- Center point indicator -->
+              <circle
+                class="scene-canvas__center-point"
+                :cx="surfaceCenter.x"
+                :cy="surfaceCenter.y"
+                r="5"
+              />
+              <!-- Rotation handle (draggable) -->
+              <circle
+                class="scene-canvas__rotation-handle"
+                :cx="rotationHandle.x"
+                :cy="rotationHandle.y"
+                r="12"
+                @pointerdown.stop="startRotationDrag(activeSurface, $event)"
+                @click.stop
+              >
+                <title>Drag to rotate ({{ Math.round(activeSurface.rotation) }}°)</title>
+              </circle>
+              <!-- Rotation icon inside handle -->
+              <text
+                class="scene-canvas__rotation-icon"
+                :x="rotationHandle.x"
+                :y="rotationHandle.y"
+                text-anchor="middle"
+                dominant-baseline="central"
+                @pointerdown.stop="startRotationDrag(activeSurface, $event)"
+                @click.stop
+              >↻</text>
+            </g>
+
+            <!-- Vertex drag indicator - crosshair showing vertex position -->
+            <g v-if="draggedVertexPosition" class="scene-canvas__drag-indicator">
+              <!-- Horizontal line across full stage -->
+              <line
+                class="scene-canvas__drag-line"
+                x1="0"
+                :y1="draggedVertexPosition.y"
+                :x2="stageWidth"
+                :y2="draggedVertexPosition.y"
+              />
+              <!-- Vertical line across full stage -->
+              <line
+                class="scene-canvas__drag-line"
+                :x1="draggedVertexPosition.x"
+                y1="0"
+                :x2="draggedVertexPosition.x"
+                :y2="stageHeight"
+              />
+              <!-- Center crosshair highlight -->
+              <circle
+                class="scene-canvas__drag-point"
+                :cx="draggedVertexPosition.x"
+                :cy="draggedVertexPosition.y"
+                r="8"
+              />
+              <!-- Coordinate label -->
+              <text
+                class="scene-canvas__drag-coords"
+                :x="draggedVertexPosition.x + 15"
+                :y="draggedVertexPosition.y - 15"
+                text-anchor="start"
+              >{{ Math.round(draggedVertexPosition.x) }}, {{ Math.round(draggedVertexPosition.y) }}</text>
+            </g>
           </svg>
         </div>
 
-        <div class="scene-canvas__toolbar" @pointerdown.stop @click.stop>
-          <SpeedDial
-            :model="shapeActions"
-            :disabled="!canAddShape"
-            direction="down"
-            showIcon="pi pi-plus"
-            hideIcon="pi pi-times"
-            buttonClass="scene-canvas__speed-dial"
+        <!-- Surface context toolbar - appears when a surface is selected -->
+        <div v-if="activeSurface" class="scene-canvas__context-bar" @pointerdown.stop @click.stop>
+          <span class="scene-canvas__context-name" :title="activeSurface.name">{{ activeSurface.name }}</span>
+          <div class="scene-canvas__context-divider"></div>
+          <Button
+            icon="pi pi-copy"
+            text
+            size="small"
+            class="scene-canvas__context-btn"
+            title="Duplicate surface (Ctrl/Cmd+D)"
+            @click="duplicateSurface"
           />
+          <Button
+            icon="pi pi-trash"
+            text
+            size="small"
+            severity="danger"
+            class="scene-canvas__context-btn scene-canvas__context-btn--danger"
+            title="Delete surface (Delete)"
+            @click="deleteSurface"
+          />
+        </div>
+
+        <div class="scene-canvas__toolbar" @pointerdown.stop @click.stop>
+          <Button
+            icon="pi pi-plus"
+            label="Add"
+            size="small"
+            :disabled="!canAddShape"
+            class="scene-canvas__add-btn"
+            title="Add a new surface to the scene"
+            @click="toggleAddMenu"
+          />
+          <Menu ref="addMenuRef" :model="shapeMenuItems" :popup="true" class="scene-canvas__add-menu" />
         </div>
       </div>
 
       <div v-if="!hasFeeds" class="scene-canvas__hint">
-        Add a feed to enable shape creation.
+        <i class="pi pi-info-circle"></i>
+        Add a feed in the Browser panel to enable shape creation.
       </div>
 
       <Message v-if="error" severity="error" class="scene-canvas__message">
@@ -376,47 +1205,289 @@ const surfacePoints = (shape: { vertices: { x: number; y: number }[] }) =>
 .scene-canvas {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
+  height: 100%;
+  padding: 8px;
 }
 
 .scene-canvas__header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #2a2a2a;
 }
 
 .scene-canvas__title {
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #888;
+}
+
+.scene-canvas__controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .scene-canvas__meta {
-  font-size: 0.85rem;
-  color: #5b564f;
+  font-size: 11px;
+  color: #666;
+  background: #1a1a1a;
+  padding: 2px 6px;
+  border-radius: 2px;
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+  font-weight: 500;
+}
+
+.scene-canvas__zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #1a1a1a;
+  border-radius: 2px;
+  padding: 2px 6px;
+}
+
+.scene-canvas__zoom-value {
+  font-size: 11px;
+  color: #888;
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+  font-weight: 500;
+  min-width: 36px;
+  text-align: center;
+  cursor: pointer;
+  transition: color 0.12s ease;
+}
+
+.scene-canvas__zoom-value:hover {
+  color: #00b4d8;
+}
+
+.scene-canvas__zoom-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 80px;
+  height: 4px;
+  background: #333;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.scene-canvas__zoom-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  background: #666;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.scene-canvas__zoom-slider::-webkit-slider-thumb:hover {
+  background: #00b4d8;
+}
+
+.scene-canvas__zoom-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  background: #666;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.scene-canvas__zoom-slider::-moz-range-thumb:hover {
+  background: #00b4d8;
+}
+
+.scene-canvas__zoom-btn {
+  padding: 2px 6px !important;
+  min-width: 0 !important;
+  font-size: 10px !important;
+  gap: 4px !important;
+}
+
+.scene-canvas__zoom-btn :deep(.p-button-icon) {
+  font-size: 10px;
+}
+
+.scene-canvas__zoom-btn :deep(.p-button-label) {
+  font-size: 10px;
+  font-weight: 500;
+}
+
+/* Classic toggle switch */
+.scene-canvas__toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.scene-canvas__toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.scene-canvas__toggle-track {
+  position: relative;
+  width: 28px;
+  height: 16px;
+  background: #333;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  border: 1px solid #444;
+}
+
+.scene-canvas__toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  background: #666;
+  border-radius: 50%;
+  transition: all 0.2s ease;
+}
+
+.scene-canvas__toggle-label {
+  font-size: 11px;
+  color: #666;
+  font-weight: 500;
+  transition: color 0.2s ease;
+}
+
+.scene-canvas__toggle:hover .scene-canvas__toggle-track {
+  border-color: #555;
+}
+
+.scene-canvas__toggle:hover .scene-canvas__toggle-thumb {
+  background: #888;
+}
+
+.scene-canvas__toggle:hover .scene-canvas__toggle-label {
+  color: #888;
+}
+
+/* Active state - default red accent (for Live toggle) */
+.scene-canvas__toggle--active .scene-canvas__toggle-track {
+  background: rgba(255, 59, 48, 0.3);
+  border-color: rgba(255, 59, 48, 0.5);
+}
+
+.scene-canvas__toggle--active .scene-canvas__toggle-thumb {
+  left: 14px;
+  background: #ff3b30;
+}
+
+.scene-canvas__toggle--active .scene-canvas__toggle-label {
+  color: #ff3b30;
+}
+
+/* Cyan variant (for Grid, Snap toggles) */
+.scene-canvas__toggle--cyan.scene-canvas__toggle--active .scene-canvas__toggle-track {
+  background: rgba(0, 180, 216, 0.3);
+  border-color: rgba(0, 180, 216, 0.5);
+}
+
+.scene-canvas__toggle--cyan.scene-canvas__toggle--active .scene-canvas__toggle-thumb {
+  background: #00b4d8;
+}
+
+.scene-canvas__toggle--cyan.scene-canvas__toggle--active .scene-canvas__toggle-label {
+  color: #00b4d8;
+}
+
+/* Disabled state */
+.scene-canvas__toggle--disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.scene-canvas__toggle--disabled:hover .scene-canvas__toggle-track {
+  border-color: #444;
+}
+
+.scene-canvas__toggle--disabled:hover .scene-canvas__toggle-thumb {
+  background: #666;
+}
+
+.scene-canvas__toggle--disabled:hover .scene-canvas__toggle-label {
+  color: #666;
 }
 
 .scene-canvas__empty {
-  color: #cbbfad;
-  padding: 16px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 32px 16px;
+  color: #555;
+  flex: 1;
+}
+
+.scene-canvas__empty-icon {
+  font-size: 2rem;
+  color: rgba(0, 180, 216, 0.2);
+  margin-bottom: 10px;
+}
+
+.scene-canvas__empty p {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #777;
+}
+
+.scene-canvas__empty-hint {
+  font-size: 11px;
+  color: #555;
+  max-width: 240px;
+  line-height: 1.4;
 }
 
 .scene-canvas__workspace {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
+  flex: 1;
 }
 
 .scene-canvas__viewport {
   position: relative;
-  width: 480px;
-  height: 270px;
+  width: 100%;
+  flex: 1;
+  min-height: 200px;
   margin: 0 auto;
-  border-radius: 14px;
-  background: radial-gradient(circle at top left, #242424, #141414 60%);
-  border: 1px solid #2f2f2f;
+  border-radius: 0;
+  background: #0a0a0a;
+  border: 1px solid #2a2a2a;
   overflow: hidden;
   touch-action: none;
+}
+
+/* Pan mode cursor when spacebar is held */
+.scene-canvas__viewport--pan-mode {
+  cursor: grab !important;
+}
+
+.scene-canvas__viewport--pan-mode:active {
+  cursor: grabbing !important;
+}
+
+/* Override all child element cursors in pan mode */
+.scene-canvas__viewport--pan-mode * {
+  cursor: inherit !important;
 }
 
 .scene-canvas__stage {
@@ -424,8 +1495,10 @@ const surfacePoints = (shape: { vertices: { x: number; y: number }[] }) =>
   width: 1920px;
   height: 1080px;
   transform-origin: 0 0;
-  background: #080808;
-  border: 1px solid #2f2f2f;
+  background:
+    linear-gradient(90deg, #1a1a1a 1px, transparent 1px) 0 0 / 48px 48px,
+    linear-gradient(#1a1a1a 1px, transparent 1px) 0 0 / 48px 48px,
+    #0a0a0a;
 }
 
 .scene-canvas__surfaces {
@@ -433,41 +1506,332 @@ const surfacePoints = (shape: { vertices: { x: number; y: number }[] }) =>
   inset: 0;
 }
 
+/* Output boundary frame */
+.scene-canvas__boundary {
+  fill: none;
+  stroke: rgba(0, 180, 216, 0.3);
+  stroke-width: 2;
+  stroke-dasharray: 8 4;
+}
+
+.scene-canvas__boundary-corners path {
+  fill: none;
+  stroke: #00b4d8;
+  stroke-width: 3;
+  stroke-linecap: square;
+}
+
+.scene-canvas__boundary-center line {
+  stroke: rgba(255, 149, 0, 0.5);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+}
+
+.scene-canvas__boundary-center circle {
+  fill: none;
+  stroke: rgba(255, 149, 0, 0.5);
+  stroke-width: 1.5;
+}
+
 .scene-canvas__surface {
-  fill: rgba(255, 255, 255, 0.06);
-  stroke: rgba(255, 255, 255, 0.45);
+  fill: rgba(0, 180, 216, 0.08);
+  stroke: rgba(0, 180, 216, 0.5);
   stroke-width: 2;
   cursor: pointer;
+  transition: fill 0.15s ease, stroke 0.15s ease;
+}
+
+.scene-canvas__surface:hover {
+  fill: rgba(0, 180, 216, 0.12);
+  stroke: rgba(0, 180, 216, 0.7);
 }
 
 .scene-canvas__surface--active {
-  stroke: #f4c469;
-  fill: rgba(244, 196, 105, 0.18);
+  stroke: #00b4d8;
+  stroke-width: 2.5;
+  fill: rgba(0, 180, 216, 0.2);
+}
+
+/* Surface labels */
+.scene-canvas__surface-label {
+  fill: rgba(180, 180, 180, 0.6);
+  font-size: 42px;
+  font-weight: 500;
+  pointer-events: all;
+  cursor: pointer;
+  user-select: none;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  transition: fill 0.15s ease;
+}
+
+.scene-canvas__surface-label:hover {
+  fill: rgba(200, 200, 200, 0.8);
+}
+
+.scene-canvas__surface-label--active {
+  fill: rgba(0, 180, 216, 0.7);
 }
 
 .scene-canvas__handle {
-  fill: #1c1a17;
-  stroke: #f4c469;
+  fill: #1a1a1a;
+  stroke: #00b4d8;
+  stroke-width: 3;
+  cursor: grab;
+  transition: fill 0.15s ease;
+  filter: drop-shadow(0 0 4px rgba(0, 180, 216, 0.5));
+}
+
+.scene-canvas__handle:hover {
+  fill: #00b4d8;
+  stroke: #fff;
+  filter: drop-shadow(0 0 8px rgba(0, 180, 216, 0.8));
+}
+
+/* Center point indicator */
+.scene-canvas__center-point {
+  fill: #ff9500;
+  stroke: #1a1a1a;
+  stroke-width: 2;
+  opacity: 0.8;
+}
+
+/* Rotation handle */
+.scene-canvas__rotation-line {
+  stroke: rgba(255, 149, 0, 0.5);
+  stroke-width: 2;
+  stroke-dasharray: 4 2;
+}
+
+.scene-canvas__rotation-handle {
+  fill: #ff9500;
+  stroke: #1a1a1a;
   stroke-width: 2;
   cursor: grab;
+  transition: fill 0.15s ease, filter 0.15s ease;
+}
+
+.scene-canvas__rotation-handle:hover {
+  fill: #ffaa33;
+  filter: drop-shadow(0 0 8px rgba(255, 149, 0, 0.6));
+}
+
+.scene-canvas__rotation-handle:active {
+  cursor: grabbing;
+}
+
+.scene-canvas__rotation-icon {
+  fill: #1a1a1a;
+  font-size: 14px;
+  font-weight: bold;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Projector calibration grid */
+.scene-canvas__projector-grid {
+  pointer-events: none;
+}
+
+.scene-canvas__projector-boundary {
+  fill: none;
+  stroke: #ff3b30;
+  stroke-width: 4;
+}
+
+.scene-canvas__projector-line {
+  stroke: rgba(255, 59, 48, 0.3);
+  stroke-width: 1;
+}
+
+.scene-canvas__projector-center {
+  stroke: rgba(255, 59, 48, 0.6);
+  stroke-width: 2;
+}
+
+.scene-canvas__projector-diagonal {
+  stroke: rgba(255, 59, 48, 0.2);
+  stroke-width: 1;
+  stroke-dasharray: 8 4;
+}
+
+.scene-canvas__projector-label {
+  fill: #ff3b30;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+}
+
+/* Vertex drag indicator crosshair */
+.scene-canvas__drag-indicator {
+  pointer-events: none;
+}
+
+.scene-canvas__drag-line {
+  stroke: rgba(0, 180, 216, 0.6);
+  stroke-width: 1;
+  stroke-dasharray: 6 3;
+}
+
+.scene-canvas__drag-point {
+  fill: none;
+  stroke: #00b4d8;
+  stroke-width: 2;
+}
+
+.scene-canvas__drag-coords {
+  fill: #00b4d8;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: monospace;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+/* Fit to view button */
+.scene-canvas__fit-btn {
+  color: #666;
+  padding: 4px 8px;
+}
+
+.scene-canvas__fit-btn:hover {
+  color: #00b4d8;
+  background: rgba(0, 180, 216, 0.1);
+}
+
+/* Context bar - appears when surface is selected */
+.scene-canvas__context-bar {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(26, 26, 26, 0.95);
+  border: 1px solid #333;
+  border-radius: 3px;
+  padding: 4px 8px;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.scene-canvas__context-name {
+  font-size: 11px;
+  font-weight: 500;
+  color: #aaa;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scene-canvas__context-divider {
+  width: 1px;
+  height: 16px;
+  background: #333;
+  margin: 0 4px;
+}
+
+.scene-canvas__context-btn {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 2px;
+}
+
+.scene-canvas__context-btn :deep(.p-button-icon) {
+  font-size: 12px;
+}
+
+.scene-canvas__context-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.scene-canvas__context-btn--danger:hover {
+  background: rgba(180, 60, 60, 0.15);
 }
 
 .scene-canvas__toolbar {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  top: 8px;
+  right: 8px;
   z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
-.scene-canvas__speed-dial :deep(.p-speeddial-button) {
-  background: #f5f2e9;
-  border: 1px solid #cfccc4;
-  color: #2f2d2a;
+.scene-canvas__add-btn {
+  background: rgba(0, 180, 216, 0.1);
+  border: 1px solid rgba(0, 180, 216, 0.3);
+  color: #00b4d8;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 5px 12px;
+  border-radius: 2px;
+  transition: all 0.12s ease;
+}
+
+.scene-canvas__add-btn:hover:not(:disabled) {
+  background: rgba(0, 180, 216, 0.2);
+  border-color: rgba(0, 180, 216, 0.5);
+  color: #00d4ff;
+}
+
+.scene-canvas__add-btn:disabled {
+  opacity: 0.4;
+}
+
+.scene-canvas__add-menu :deep(.p-menu) {
+  background: #222;
+  border: 1px solid #333;
+  border-radius: 2px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  min-width: 120px;
+  padding: 4px 0;
+}
+
+.scene-canvas__add-menu :deep(.p-menu-list) {
+  padding: 0;
+}
+
+.scene-canvas__add-menu :deep(.p-menuitem-link) {
+  padding: 7px 14px;
+  color: #aaa;
+  font-size: 12px;
+  transition: all 0.1s ease;
+}
+
+.scene-canvas__add-menu :deep(.p-menuitem-link:hover) {
+  background: rgba(0, 180, 216, 0.1);
+  color: #00b4d8;
+}
+
+.scene-canvas__add-menu :deep(.p-menuitem-icon) {
+  color: #666;
+  margin-right: 8px;
+  font-size: 12px;
+}
+
+.scene-canvas__add-menu :deep(.p-menuitem-link:hover .p-menuitem-icon) {
+  color: #00b4d8;
 }
 
 .scene-canvas__hint {
-  font-size: 0.85rem;
-  color: #6b665f;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: #777;
+  padding: 7px 12px;
+  background: rgba(0, 180, 216, 0.06);
+  border: 1px solid rgba(0, 180, 216, 0.15);
+  border-radius: 2px;
+}
+
+.scene-canvas__hint i {
+  color: #00b4d8;
+  font-size: 12px;
 }
 
 .scene-canvas__message {

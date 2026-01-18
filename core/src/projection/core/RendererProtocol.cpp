@@ -17,7 +17,9 @@ const std::unordered_map<RendererMessageType, std::string> kRendererMessageTypeT
                                                                                        {RendererMessageType::LoadScene, "loadScene"},
                                                                                        {RendererMessageType::LoadSceneDefinition, "loadSceneDefinition"},
                                                                                        {RendererMessageType::SetFeedForSurface, "setFeedForSurface"},
-                                                                                       {RendererMessageType::PlayCue, "playCue"}};
+                                                                                       {RendererMessageType::PlayCue, "playCue"},
+                                                                                       {RendererMessageType::ShowTestPattern, "showTestPattern"},
+                                                                                       {RendererMessageType::ShowCrosshair, "showCrosshair"}};
 
 std::string toString(RendererMessageType type) { return kRendererMessageTypeToString.at(type); }
 
@@ -156,6 +158,36 @@ void from_json(const json& j, PlayCueMessage& message) {
   message.cueId = CueId(requireString(j, "cueId"));
 }
 
+void to_json(json& j, const ShowTestPatternMessage& message) {
+  j = json{{"enabled", message.enabled}};
+}
+
+void from_json(const json& j, ShowTestPatternMessage& message) {
+  if (!j.is_object()) {
+    throw std::runtime_error("ShowTestPattern payload must be an object");
+  }
+  if (!j.contains("enabled")) {
+    throw std::runtime_error("Missing required field: enabled");
+  }
+  message.enabled = j.at("enabled").get<bool>();
+}
+
+void to_json(json& j, const ShowCrosshairMessage& message) {
+  j = json{{"enabled", message.enabled}, {"x", message.x}, {"y", message.y}};
+}
+
+void from_json(const json& j, ShowCrosshairMessage& message) {
+  if (!j.is_object()) {
+    throw std::runtime_error("ShowCrosshair payload must be an object");
+  }
+  if (!j.contains("enabled")) {
+    throw std::runtime_error("Missing required field: enabled");
+  }
+  message.enabled = j.at("enabled").get<bool>();
+  message.x = j.value("x", 0.0f);
+  message.y = j.value("y", 0.0f);
+}
+
 void to_json(json& j, const RendererMessage& message) {
   j = json{{"type", message.type}, {"commandId", message.commandId}};
 
@@ -202,6 +234,18 @@ void to_json(json& j, const RendererMessage& message) {
         throw std::runtime_error("PlayCue message missing payload");
       }
       payload = *message.playCue;
+      break;
+    case RendererMessageType::ShowTestPattern:
+      if (!message.showTestPattern) {
+        throw std::runtime_error("ShowTestPattern message missing payload");
+      }
+      payload = *message.showTestPattern;
+      break;
+    case RendererMessageType::ShowCrosshair:
+      if (!message.showCrosshair) {
+        throw std::runtime_error("ShowCrosshair message missing payload");
+      }
+      payload = *message.showCrosshair;
       break;
   }
 
@@ -268,6 +312,18 @@ void from_json(const json& j, RendererMessage& message) {
       PlayCueMessage playCueMessage;
       from_json(payload, playCueMessage);
       message.playCue = playCueMessage;
+      break;
+    }
+    case RendererMessageType::ShowTestPattern: {
+      ShowTestPatternMessage showTestPatternMessage;
+      from_json(payload, showTestPatternMessage);
+      message.showTestPattern = showTestPatternMessage;
+      break;
+    }
+    case RendererMessageType::ShowCrosshair: {
+      ShowCrosshairMessage showCrosshairMessage;
+      from_json(payload, showCrosshairMessage);
+      message.showCrosshair = showCrosshairMessage;
       break;
     }
   }

@@ -175,7 +175,8 @@ void to_json(json& j, const Surface& surface) {
            {"opacity", surface.getOpacity()},
            {"brightness", surface.getBrightness()},
            {"blendMode", surface.getBlendMode()},
-           {"zOrder", surface.getZOrder()}};
+           {"zOrder", surface.getZOrder()},
+           {"rotation", surface.getRotation()}};
 }
 
 void from_json(const json& j, Surface& surface) {
@@ -204,6 +205,11 @@ void from_json(const json& j, Surface& surface) {
 
   surface = Surface(SurfaceId{id}, name, vertices, FeedId{feedId}, opacity, brightness,
                     parseBlendModeString(blendModeStr), requireInteger(j, "zOrder"));
+
+  // Rotation is optional for backward compatibility
+  if (j.contains("rotation") && j["rotation"].is_number()) {
+    surface.setRotation(j["rotation"].get<float>());
+  }
 }
 
 void to_json(json& j, const Scene& scene) {

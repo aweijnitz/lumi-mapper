@@ -92,6 +92,64 @@ CREATE TABLE IF NOT EXISTS project_cues (
 );
 )SQL";
 
+// Migration: Add rotation column to surfaces table (defaults to 0)
+const char* kMigrationAddRotationColumn = R"SQL(
+ALTER TABLE surfaces ADD COLUMN rotation REAL NOT NULL DEFAULT 0;
+)SQL";
+
+int getSchemaVersion(sqlite3* handle) {
+    const char* sql = "SELECT version FROM schema_version LIMIT 1;";
+    sqlite3_stmt* stmt = nullptr;
+    int result = sqlite3_prepare_v2(handle, sql, -1, &stmt, nullptr);
+    if (result != SQLITE_OK) {
+        return 0;
+    }
+    int version = 0;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        version = sqlite3_column_int(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+    return version;
+}
+
+void setSchemaVersion(sqlite3* handle, int version) {
+    // Clear existing version and insert new one
+    const char* deleteSql = "DELETE FROM schema_version;";
+    sqlite3_exec(handle, deleteSql, nullptr, nullptr, nullptr);
+
+    const char* insertSql = "INSERT INTO schema_version(version) VALUES(?);";
+    sqlite3_stmt* stmt = nullptr;
+    int result = sqlite3_prepare_v2(handle, insertSql, -1, &stmt, nullptr);
+    if (result != SQLITE_OK) {
+        throw std::runtime_error("Failed to prepare schema version insert: " + std::string(sqlite3_errmsg(handle)));
+    }
+    sqlite3_bind_int(stmt, 1, version);
+    result = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    if (result != SQLITE_DONE) {
+        throw std::runtime_error("Failed to set schema version: " + std::string(sqlite3_errmsg(handle)));
+    }
+}
+
+bool columnExists(sqlite3* handle, const char* table, const char* column) {
+    std::string sql = "PRAGMA table_info(" + std::string(table) + ");";
+    sqlite3_stmt* stmt = nullptr;
+    int result = sqlite3_prepare_v2(handle, sql.c_str(), -1, &stmt, nullptr);
+    if (result != SQLITE_OK) {
+        return false;
+    }
+    bool found = false;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const unsigned char* colName = sqlite3_column_text(stmt, 1);
+        if (colName && std::string(reinterpret_cast<const char*>(colName)) == column) {
+            found = true;
+            break;
+        }
+    }
+    sqlite3_finalize(stmt);
+    return found;
+}
+
 void ensureSchemaVersionTable(sqlite3* handle) {
     char* errorMessage = nullptr;
     int result = sqlite3_exec(handle, kCreateSchemaVersion, nullptr, nullptr, &errorMessage);
@@ -157,6 +215,24 @@ void SchemaMigrations::applyMigrations(SqliteConnection& connection) {
 
     ensureSchemaVersionTable(handle);
     createTables(handle);
+
+    // Apply incremental migrations based on schema version
+    int currentVersion = getSchemaVersion(handle);
+
+    // Migration 1: Add rotation column to surfaces table
+    if (currentVersion < 1) {
+        // Only run ALTER if column doesn't already exist (for safety)
+        if (!columnExists(handle, "surfaces", "rotation")) {
+            char* errorMessage = nullptr;
+            int result = sqlite3_exec(handle, kMigrationAddRotationColumn, nullptr, nullptr, &errorMessage);
+            if (result != SQLITE_OK) {
+                std::string error = errorMessage ? errorMessage : "Unknown error";
+                sqlite3_free(errorMessage);
+                throw std::runtime_error("Failed to add rotation column: " + error);
+            }
+        }
+        setSchemaVersion(handle, 1);
+    }
 }
 
 }  // namespace projection::server::db

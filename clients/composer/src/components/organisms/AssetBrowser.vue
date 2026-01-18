@@ -105,14 +105,16 @@ const deleteSelected = async () => {
 .asset-browser {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 }
 
 .asset-browser__toolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #2a2a2a;
 }
 
 .asset-browser__table :deep(.p-datatable-tbody > tr) {

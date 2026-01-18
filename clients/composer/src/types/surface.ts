@@ -14,4 +14,5 @@ export type Surface = {
   brightness: number;
   blendMode: BlendMode;
   zOrder: number;
+  rotation: number;  // Video rotation in degrees
 };

@@ -1,6 +1,7 @@
 #include "ofApp.h"
 
 #include <ofMain.h>
+#include <GLFW/glfw3.h>
 
 #include <atomic>
 #include <csignal>
@@ -46,6 +47,10 @@ struct Args {
   bool verbose;
   bool enableAudio;
   int connectRetries;
+  bool fullscreen;
+  int display;
+  int width;
+  int height;
 };
 
 std::string defaultHost() {
@@ -87,7 +92,38 @@ Args parseArgs(int argc, char* argv[]) {
       std::cerr << "Invalid RENDERER_CONNECT_RETRIES value, defaulting to 10" << std::endl;
     }
   }
-  Args args{defaultHost(), defaultPort(), defaultName(), false, enableAudio, connectRetries};
+
+  // Display settings from environment
+  bool fullscreen = false;
+  if (const char* envFullscreen = std::getenv("RENDERER_FULLSCREEN")) {
+    fullscreen = (std::string(envFullscreen) == "1" || std::string(envFullscreen) == "true");
+  }
+  int display = -1;  // -1 means use default/primary display
+  if (const char* envDisplay = std::getenv("RENDERER_DISPLAY")) {
+    try {
+      display = std::stoi(envDisplay);
+    } catch (...) {
+      std::cerr << "Invalid RENDERER_DISPLAY value, using default" << std::endl;
+    }
+  }
+  int width = 1280;
+  int height = 720;
+  if (const char* envWidth = std::getenv("RENDERER_WIDTH")) {
+    try {
+      width = std::stoi(envWidth);
+    } catch (...) {
+      std::cerr << "Invalid RENDERER_WIDTH value, defaulting to 1280" << std::endl;
+    }
+  }
+  if (const char* envHeight = std::getenv("RENDERER_HEIGHT")) {
+    try {
+      height = std::stoi(envHeight);
+    } catch (...) {
+      std::cerr << "Invalid RENDERER_HEIGHT value, defaulting to 720" << std::endl;
+    }
+  }
+
+  Args args{defaultHost(), defaultPort(), defaultName(), false, enableAudio, connectRetries, fullscreen, display, width, height};
   for (int i = 1; i < argc; ++i) {
     std::string arg(argv[i]);
     if (arg == "--server-host" && i + 1 < argc) {
@@ -114,6 +150,57 @@ Args parseArgs(int argc, char* argv[]) {
       args.connectRetries = std::stoi(argv[++i]);
     } else if (arg.rfind("--connect-retries=", 0) == 0) {
       args.connectRetries = std::stoi(arg.substr(18));
+    } else if (arg == "--fullscreen" || arg == "-f") {
+      args.fullscreen = true;
+    } else if (arg == "--windowed") {
+      args.fullscreen = false;
+    } else if (arg == "--display" && i + 1 < argc) {
+      args.display = std::stoi(argv[++i]);
+    } else if (arg.rfind("--display=", 0) == 0) {
+      args.display = std::stoi(arg.substr(10));
+    } else if (arg == "--width" && i + 1 < argc) {
+      args.width = std::stoi(argv[++i]);
+    } else if (arg.rfind("--width=", 0) == 0) {
+      args.width = std::stoi(arg.substr(8));
+    } else if (arg == "--height" && i + 1 < argc) {
+      args.height = std::stoi(argv[++i]);
+    } else if (arg.rfind("--height=", 0) == 0) {
+      args.height = std::stoi(arg.substr(9));
+    } else if (arg == "--resolution" && i + 1 < argc) {
+      std::string res = argv[++i];
+      auto xPos = res.find('x');
+      if (xPos != std::string::npos) {
+        args.width = std::stoi(res.substr(0, xPos));
+        args.height = std::stoi(res.substr(xPos + 1));
+      }
+    } else if (arg.rfind("--resolution=", 0) == 0) {
+      std::string res = arg.substr(13);
+      auto xPos = res.find('x');
+      if (xPos != std::string::npos) {
+        args.width = std::stoi(res.substr(0, xPos));
+        args.height = std::stoi(res.substr(xPos + 1));
+      }
+    } else if (arg == "--help" || arg == "-h") {
+      std::cout << "Usage: renderer [options]\n"
+                << "Options:\n"
+                << "  --server-host=HOST    Server host (default: 127.0.0.1)\n"
+                << "  --server-port=PORT    Server port (default: 5050)\n"
+                << "  --name=NAME           Renderer name\n"
+                << "  --fullscreen, -f      Run in fullscreen mode\n"
+                << "  --windowed            Run in windowed mode (default)\n"
+                << "  --display=N           Use display N (0 = primary, 1 = secondary, etc.)\n"
+                << "  --width=W             Window width (default: 1280)\n"
+                << "  --height=H            Window height (default: 720)\n"
+                << "  --resolution=WxH      Set resolution (e.g., 1920x1080)\n"
+                << "  --verbose             Enable verbose logging\n"
+                << "  --disable-audio       Disable audio playback\n"
+                << "  --connect-retries=N   Number of connection retries (default: 10)\n"
+                << "\nEnvironment variables:\n"
+                << "  RENDERER_HOST, RENDERER_PORT, RENDERER_NAME\n"
+                << "  RENDERER_FULLSCREEN (1/true), RENDERER_DISPLAY\n"
+                << "  RENDERER_WIDTH, RENDERER_HEIGHT\n"
+                << "  RENDERER_DISABLE_AUDIO, RENDERER_CONNECT_RETRIES\n";
+      std::exit(0);
     }
   }
   return args;
@@ -125,11 +212,55 @@ int main(int argc, char* argv[]) {
   if (args.verbose) {
     std::cerr << "[renderer] verbose mode on" << std::endl;
   }
-  ofSetupOpenGL(640, 480, OF_WINDOW);
+
+  // Configure window mode
+  ofWindowMode windowMode = args.fullscreen ? OF_FULLSCREEN : OF_WINDOW;
+
+  if (args.verbose) {
+    std::cerr << "[renderer] display mode: " << (args.fullscreen ? "fullscreen" : "windowed") << std::endl;
+    std::cerr << "[renderer] resolution: " << args.width << "x" << args.height << std::endl;
+    if (args.display >= 0) {
+      std::cerr << "[renderer] target display: " << args.display << std::endl;
+    }
+  }
+
+  // Setup OpenGL with specified resolution and mode
+  ofSetupOpenGL(args.width, args.height, windowMode);
+
   if (!projection::renderer::isWindowAvailable(ofGetWindowPtr(), std::cerr, "renderer")) {
     std::cerr << "[renderer] OpenGL initialization failed; window was not created" << std::endl;
     return 1;
   }
+
+  // Position window on the specified display if requested
+  if (args.display >= 0) {
+    // Get display info using GLFW (openFrameworks uses GLFW on macOS/Linux)
+    int monitorCount = 0;
+    GLFWmonitor** monitors = glfwGetMonitors(&monitorCount);
+    if (args.verbose) {
+      std::cerr << "[renderer] detected " << monitorCount << " display(s)" << std::endl;
+    }
+    if (args.display < monitorCount && monitors != nullptr) {
+      GLFWmonitor* targetMonitor = monitors[args.display];
+      int monitorX, monitorY;
+      glfwGetMonitorPos(targetMonitor, &monitorX, &monitorY);
+      const GLFWvidmode* mode = glfwGetVideoMode(targetMonitor);
+      if (args.verbose) {
+        std::cerr << "[renderer] display " << args.display << " at position ("
+                  << monitorX << ", " << monitorY << ") with resolution "
+                  << mode->width << "x" << mode->height << std::endl;
+      }
+      // Move window to target display
+      ofSetWindowPosition(monitorX, monitorY);
+      // If fullscreen, resize to match the display resolution
+      if (args.fullscreen) {
+        ofSetWindowShape(mode->width, mode->height);
+      }
+    } else {
+      std::cerr << "[renderer] warning: display " << args.display << " not found (only " << monitorCount << " available)" << std::endl;
+    }
+  }
+
   installSignalHandlers();
   return ofRunApp(new ofApp(args.host, args.port, args.name, args.connectRetries, args.verbose, args.enableAudio));
 }

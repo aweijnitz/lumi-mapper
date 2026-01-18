@@ -47,12 +47,15 @@ class Surface {
   int getZOrder() const { return zOrder_; }
   void setZOrder(int z) { zOrder_ = z; }
 
+  float getRotation() const { return rotation_; }
+  void setRotation(float degrees) { rotation_ = degrees; }
+
   bool isValid() const;
 
   bool operator==(const Surface& other) const {
     return id_ == other.id_ && name_ == other.name_ && vertices_ == other.vertices_ && feedId_ == other.feedId_ &&
            opacity_ == other.opacity_ && brightness_ == other.brightness_ && blendMode_ == other.blendMode_ &&
-           zOrder_ == other.zOrder_;
+           zOrder_ == other.zOrder_ && rotation_ == other.rotation_;
   }
 
  private:
@@ -66,6 +69,7 @@ class Surface {
   float brightness_{1.0f};
   BlendMode blendMode_{BlendMode::Normal};
   int zOrder_{0};
+  float rotation_{0.0f};  // Video rotation in degrees
 };
 
 }  // namespace projection::core
