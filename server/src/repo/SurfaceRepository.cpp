@@ -34,8 +34,18 @@ core::Surface SurfaceRepository::createSurface(const core::Surface& surface, con
         throw std::runtime_error("Failed to prepare surface insert statement: " + std::string(sqlite3_errmsg(handle)));
     }
 
-    const nlohmann::json verticesJson = surface.getVertices();
-    const std::string verticesJsonStr = verticesJson.dump();
+    // Serialize shape data based on surface type
+    nlohmann::json shapeJson;
+    if (surface.isEllipse()) {
+        shapeJson["surfaceType"] = "ellipse";
+        shapeJson["center"] = nlohmann::json{{"x", surface.getCenter().x}, {"y", surface.getCenter().y}};
+        shapeJson["radiusX"] = surface.getRadiusX();
+        shapeJson["radiusY"] = surface.getRadiusY();
+    } else {
+        shapeJson["surfaceType"] = "polygon";
+        shapeJson["vertices"] = surface.getVertices();
+    }
+    const std::string shapeJsonStr = shapeJson.dump();
     const std::string blendMode = core::toString(surface.getBlendMode());
 
     int bindIndex = 1;
@@ -93,10 +103,10 @@ core::Surface SurfaceRepository::createSurface(const core::Surface& surface, con
         throw std::runtime_error("Failed to bind surface blend mode: " + std::string(sqlite3_errmsg(handle)));
     }
 
-    result = sqlite3_bind_text(stmt, bindIndex++, verticesJsonStr.c_str(), -1, SQLITE_TRANSIENT);
+    result = sqlite3_bind_text(stmt, bindIndex++, shapeJsonStr.c_str(), -1, SQLITE_TRANSIENT);
     if (result != SQLITE_OK) {
         sqlite3_finalize(stmt);
-        throw std::runtime_error("Failed to bind surface vertices: " + std::string(sqlite3_errmsg(handle)));
+        throw std::runtime_error("Failed to bind surface shape data: " + std::string(sqlite3_errmsg(handle)));
     }
 
     result = sqlite3_bind_double(stmt, bindIndex, surface.getRotation());
@@ -163,8 +173,7 @@ std::vector<core::Surface> SurfaceRepository::listSurfacesForScene(const core::P
         std::string feedId = feedIdText ? reinterpret_cast<const char*>(feedIdText) : "";
         std::string blendModeStr = blendModeText ? reinterpret_cast<const char*>(blendModeText) : "";
 
-        nlohmann::json verticesParsed = nlohmann::json::parse(verticesJson);
-        std::vector<core::Vec2> vertices = verticesParsed.get<std::vector<core::Vec2>>();
+        nlohmann::json shapeData = nlohmann::json::parse(verticesJson);
 
         core::BlendMode blendMode;
         if (!core::fromString(blendModeStr, blendMode)) {
@@ -172,8 +181,37 @@ std::vector<core::Surface> SurfaceRepository::listSurfacesForScene(const core::P
             throw std::runtime_error("Failed to parse blend mode for surface: " + blendModeStr);
         }
 
-        core::Surface surface(core::SurfaceId{id}, name, vertices, core::FeedId{feedId},
-                              static_cast<float>(opacity), static_cast<float>(brightness), blendMode, zOrder);
+        // Determine surface type (default to polygon for backwards compatibility)
+        std::string surfaceType = "polygon";
+        if (shapeData.contains("surfaceType") && shapeData["surfaceType"].is_string()) {
+            surfaceType = shapeData["surfaceType"].get<std::string>();
+        }
+
+        core::Surface surface;
+        if (surfaceType == "ellipse") {
+            // Parse ellipse surface
+            core::Vec2 center{0.0f, 0.0f};
+            if (shapeData.contains("center") && shapeData["center"].is_object()) {
+                center.x = shapeData["center"]["x"].get<float>();
+                center.y = shapeData["center"]["y"].get<float>();
+            }
+            float radiusX = shapeData.value("radiusX", 0.45f);
+            float radiusY = shapeData.value("radiusY", 0.45f);
+            surface = core::Surface(core::SurfaceId{id}, name, center, radiusX, radiusY, core::FeedId{feedId},
+                                    static_cast<float>(opacity), static_cast<float>(brightness), blendMode, zOrder);
+        } else {
+            // Parse polygon surface (legacy format: direct array or wrapped in "vertices" key)
+            std::vector<core::Vec2> vertices;
+            if (shapeData.is_array()) {
+                // Legacy format: direct vertex array
+                vertices = shapeData.get<std::vector<core::Vec2>>();
+            } else if (shapeData.contains("vertices") && shapeData["vertices"].is_array()) {
+                // New format: wrapped in object
+                vertices = shapeData["vertices"].get<std::vector<core::Vec2>>();
+            }
+            surface = core::Surface(core::SurfaceId{id}, name, vertices, core::FeedId{feedId},
+                                    static_cast<float>(opacity), static_cast<float>(brightness), blendMode, zOrder);
+        }
         surface.setRotation(static_cast<float>(rotation));
         surfaces.emplace_back(std::move(surface));
     }

@@ -174,7 +174,13 @@ void ofApp::draw() {
       continue;
     }
 
-    const auto& vertices = surface.getVertices();
+    // Get vertices - for ellipse surfaces, generate from center/radii
+    std::vector<projection::core::Vec2> vertices;
+    if (surface.isEllipse()) {
+      vertices = surface.generateEllipseVertices(32);
+    } else {
+      vertices = surface.getVertices();
+    }
     if (vertices.size() < 3) {
       continue;
     }

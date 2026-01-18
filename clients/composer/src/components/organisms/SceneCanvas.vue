@@ -3,12 +3,12 @@ import { computed, reactive, ref, watch, onMounted, onUnmounted, nextTick } from
 import { storeToRefs } from "pinia";
 import Message from "primevue/message";
 import Button from "primevue/button";
-import Menu from "primevue/menu";
 import { useSceneStore } from "../../stores/sceneStore";
 import { useFeedStore } from "../../stores/feedStore";
 import { useRendererStore } from "../../stores/rendererStore";
 import { createSurface, type SurfaceShape } from "../../composables/useSurfaceFactory";
-import type { Surface, Vec2 } from "../../types/surface";
+import type { Surface, Vec2, EllipseSurface } from "../../types/surface";
+import { isEllipseSurface, getSurfaceVertices } from "../../types/surface";
 
 const sceneStore = useSceneStore();
 const feedStore = useFeedStore();
@@ -20,6 +20,7 @@ const zoom = ref(0.25);
 const panX = ref(0);
 const panY = ref(0);
 const isPanning = ref(false);
+const panPointerId = ref<number | null>(null);
 const panStartX = ref(0);
 const panStartY = ref(0);
 const panOriginX = ref(0);
@@ -27,13 +28,19 @@ const panOriginY = ref(0);
 const panMoved = ref(false);
 const suppressClear = ref(false);
 const dragState = reactive<{
-  mode: "shape" | "vertex" | "rotation" | null;
+  mode: "shape" | "vertex" | "rotation" | "ellipse-center" | "ellipse-radius-x" | "ellipse-radius-y" | null;
   surfaceId: string | null;
   vertexIndex: number | null;
   startPointer: Vec2 | null;
   startVertices: Vec2[];
   startRotation: number;
   startAngle: number;
+  // Ellipse-specific state
+  startCenter: Vec2 | null;
+  startRadiusX: number;
+  startRadiusY: number;
+  // Track pointer for capture release
+  pointerId: number | null;
 }>({
   mode: null,
   surfaceId: null,
@@ -42,6 +49,10 @@ const dragState = reactive<{
   startVertices: [],
   startRotation: 0,
   startAngle: 0,
+  startCenter: null,
+  startRadiusX: 0,
+  startRadiusY: 0,
+  pointerId: null,
 });
 
 // Edge snapping configuration
@@ -72,18 +83,24 @@ const getFeedName = (feedId: string): string => {
 
 // Compute surface label info (center position and text)
 const getSurfaceLabelInfo = (surface: Surface) => {
-  const vertices = surface.vertices;
-  if (vertices.length === 0) return null;
+  let center: Vec2;
 
-  // Compute centroid
-  const sum = vertices.reduce(
-    (acc, v) => ({ x: acc.x + v.x, y: acc.y + v.y }),
-    { x: 0, y: 0 }
-  );
-  const center = {
-    x: sum.x / vertices.length,
-    y: sum.y / vertices.length,
-  };
+  if (isEllipseSurface(surface)) {
+    center = surface.center;
+  } else {
+    const vertices = "vertices" in surface ? surface.vertices : [];
+    if (!vertices || vertices.length === 0) return null;
+
+    // Compute centroid
+    const sum = vertices.reduce(
+      (acc, v) => ({ x: acc.x + v.x, y: acc.y + v.y }),
+      { x: 0, y: 0 }
+    );
+    center = {
+      x: sum.x / vertices.length,
+      y: sum.y / vertices.length,
+    };
+  }
 
   // Convert to stage coordinates
   const stagePos = toStage(center.x, center.y);
@@ -230,9 +247,31 @@ const fitToView = () => {
   centerViewport();
 };
 
+// Global pointer event handlers for reliable drag end (even if pointer leaves viewport)
+const handleGlobalPointerUp = async () => {
+  if (dragState.mode) {
+    await endDrag();
+  }
+  endPan();
+};
+
+// Global move handler for when pointer leaves viewport during drag
+const handleGlobalPointerMove = (event: PointerEvent) => {
+  // Only handle if we have an active drag/pan with a tracked pointer
+  if (dragState.mode && dragState.pointerId === event.pointerId) {
+    moveDrag(event);
+  } else if (isPanning.value && panPointerId.value === event.pointerId) {
+    movePan(event);
+  }
+};
+
 onMounted(() => {
   window.addEventListener("keydown", handleKeyDown);
   window.addEventListener("keyup", handleKeyUp);
+  // Global listeners ensure drag/pan ends even if pointer leaves the viewport
+  window.addEventListener("pointerup", handleGlobalPointerUp);
+  window.addEventListener("pointercancel", handleGlobalPointerUp);
+  window.addEventListener("pointermove", handleGlobalPointerMove);
   // Center viewport after DOM is fully ready - use multiple attempts for reliability
   const attemptCenter = (attempts = 0) => {
     if (!viewportRef.value) {
@@ -257,6 +296,9 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener("keydown", handleKeyDown);
   window.removeEventListener("keyup", handleKeyUp);
+  window.removeEventListener("pointerup", handleGlobalPointerUp);
+  window.removeEventListener("pointercancel", handleGlobalPointerUp);
+  window.removeEventListener("pointermove", handleGlobalPointerMove);
   if (previewDebounceTimer) {
     clearTimeout(previewDebounceTimer);
   }
@@ -291,28 +333,15 @@ const addSurface = async (shape: SurfaceShape) => {
   sceneStore.setActiveSurfaceId(newSurface.id);
 };
 
-const addMenuRef = ref<InstanceType<typeof Menu> | null>(null);
+const showShapeMenu = ref(false);
 
-const shapeMenuItems = computed(() => [
-  {
-    label: "Rectangle",
-    icon: "pi pi-stop",
-    command: () => addSurface("rectangle"),
-  },
-  {
-    label: "Quad",
-    icon: "pi pi-clone",
-    command: () => addSurface("quad"),
-  },
-  {
-    label: "Circle",
-    icon: "pi pi-circle",
-    command: () => addSurface("circle"),
-  },
-]);
+const toggleAddMenu = () => {
+  showShapeMenu.value = !showShapeMenu.value;
+};
 
-const toggleAddMenu = (event: Event) => {
-  addMenuRef.value?.toggle(event);
+// Close shape menu when clicking outside
+const closeShapeMenu = () => {
+  showShapeMenu.value = false;
 };
 
 const clamp = (value: number, min: number, max: number) =>
@@ -324,7 +353,14 @@ const getOtherSurfaceVertices = (excludeSurfaceId: string): Vec2[] => {
   const vertices: Vec2[] = [];
   for (const surface of activeScene.value.surfaces) {
     if (surface.id === excludeSurfaceId) continue;
-    vertices.push(...surface.vertices);
+    // Get vertices based on surface type
+    if (isEllipseSurface(surface)) {
+      // For ellipses, use generated vertices for snapping
+      const ellipseVerts = getSurfaceVertices(surface, 16);
+      vertices.push(...ellipseVerts);
+    } else if ("vertices" in surface && surface.vertices) {
+      vertices.push(...surface.vertices);
+    }
   }
   return vertices;
 };
@@ -335,7 +371,15 @@ const getOtherSurfaceEdges = (excludeSurfaceId: string) => {
   const edges: { p1: Vec2; p2: Vec2 }[] = [];
   for (const surface of activeScene.value.surfaces) {
     if (surface.id === excludeSurfaceId) continue;
-    const verts = surface.vertices;
+    // Get vertices based on surface type
+    let verts: Vec2[];
+    if (isEllipseSurface(surface)) {
+      verts = getSurfaceVertices(surface, 16);
+    } else if ("vertices" in surface && surface.vertices) {
+      verts = surface.vertices;
+    } else {
+      continue;
+    }
     for (let i = 0; i < verts.length; i++) {
       edges.push({
         p1: verts[i],
@@ -411,8 +455,8 @@ const clientToStage = (event: PointerEvent | WheelEvent) => {
 };
 
 const stageToNormalized = (stage: Vec2): Vec2 => ({
-  x: clamp((stage.x / stageWidth - 0.5) * 2, -1, 1),
-  y: clamp((stage.y / stageHeight - 0.5) * 2, -1, 1),
+  x: (stage.x / stageWidth - 0.5) * 2,
+  y: (stage.y / stageHeight - 0.5) * 2,
 });
 
 const clientToNormalized = (event: PointerEvent | WheelEvent): Vec2 =>
@@ -452,11 +496,12 @@ const startPan = (event: PointerEvent) => {
   if (!spacebarHeld.value) {
     // Don't start panning if we clicked on an interactive element (handle, surface, etc.)
     const target = event.target as Element;
-    if (target.closest('.scene-canvas__rotation-handle, .scene-canvas__rotation-icon, .scene-canvas__handle, .scene-canvas__surface')) {
+    if (target.closest('.scene-canvas__rotation-handle, .scene-canvas__rotation-icon, .scene-canvas__handle, .scene-canvas__ellipse-handle, .scene-canvas__surface, .scene-canvas__surface-label')) {
       return;
     }
   }
   isPanning.value = true;
+  panPointerId.value = event.pointerId;
   panMoved.value = false;
   panStartX.value = event.clientX;
   panStartY.value = event.clientY;
@@ -483,6 +528,7 @@ const movePan = (event: PointerEvent) => {
 
 const endPan = () => {
   isPanning.value = false;
+  panPointerId.value = null;
 };
 
 const findSurface = (surfaceId: string) =>
@@ -490,7 +536,7 @@ const findSurface = (surfaceId: string) =>
 
 const updateSurfaceVertices = (surfaceId: string, vertices: Vec2[]) => {
   const surface = findSurface(surfaceId);
-  if (!surface) {
+  if (!surface || !("vertices" in surface)) {
     return;
   }
   surface.vertices = vertices;
@@ -506,12 +552,27 @@ const startShapeDrag = (surface: Surface, event: PointerEvent) => {
     return;
   }
   event.preventDefault();
+  event.stopPropagation();
   suppressClear.value = true;
-  dragState.mode = "shape";
-  dragState.surfaceId = surface.id;
-  dragState.vertexIndex = null;
-  dragState.startPointer = clientToNormalized(event);
-  dragState.startVertices = surface.vertices.map((vertex) => ({ ...vertex }));
+
+  if (isEllipseSurface(surface)) {
+    // For ellipse surfaces, dragging the shape moves its center
+    dragState.mode = "ellipse-center";
+    dragState.surfaceId = surface.id;
+    dragState.startPointer = clientToNormalized(event);
+    dragState.startCenter = { ...surface.center };
+    dragState.startRadiusX = surface.radiusX;
+    dragState.startRadiusY = surface.radiusY;
+  } else {
+    // Polygon surface - get vertices safely
+    const vertices = "vertices" in surface ? surface.vertices : [];
+    dragState.mode = "shape";
+    dragState.surfaceId = surface.id;
+    dragState.vertexIndex = null;
+    dragState.startPointer = clientToNormalized(event);
+    dragState.startVertices = vertices.map((vertex) => ({ ...vertex }));
+  }
+  dragState.pointerId = event.pointerId;
   sceneStore.setActiveSurfaceId(surface.id);
   viewportRef.value?.setPointerCapture(event.pointerId);
 };
@@ -526,25 +587,82 @@ const startVertexDrag = (surface: Surface, index: number, event: PointerEvent) =
     return;
   }
   event.preventDefault();
+  event.stopPropagation();
   suppressClear.value = true;
+
+  // Get vertices - surface must be a polygon type here
+  const vertices = "vertices" in surface ? surface.vertices : [];
+  if (vertices.length === 0) {
+    return;
+  }
+
   dragState.mode = "vertex";
   dragState.surfaceId = surface.id;
   dragState.vertexIndex = index;
   dragState.startPointer = clientToNormalized(event);
-  dragState.startVertices = surface.vertices.map((vertex) => ({ ...vertex }));
+  dragState.startVertices = vertices.map((vertex) => ({ ...vertex }));
+  dragState.pointerId = event.pointerId;
   sceneStore.setActiveSurfaceId(surface.id);
   viewportRef.value?.setPointerCapture(event.pointerId);
 };
 
 // Calculate normalized center of a surface
 const getSurfaceCenterNorm = (surface: Surface): Vec2 => {
-  const vertices = surface.vertices;
+  if (isEllipseSurface(surface)) {
+    return surface.center;
+  }
+  const vertices = "vertices" in surface ? surface.vertices : [];
+  if (!vertices || vertices.length === 0) {
+    return { x: 0, y: 0 };
+  }
   const sumX = vertices.reduce((acc, v) => acc + v.x, 0);
   const sumY = vertices.reduce((acc, v) => acc + v.y, 0);
   return {
     x: sumX / vertices.length,
     y: sumY / vertices.length,
   };
+};
+
+// Start dragging ellipse radius-X handle
+const startEllipseRadiusXDrag = (surface: EllipseSurface, event: PointerEvent) => {
+  if (event.button !== 0) return;
+  if (spacebarHeld.value) {
+    startPan(event);
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  suppressClear.value = true;
+  dragState.mode = "ellipse-radius-x";
+  dragState.surfaceId = surface.id;
+  dragState.startPointer = clientToNormalized(event);
+  dragState.startCenter = { ...surface.center };
+  dragState.startRadiusX = surface.radiusX;
+  dragState.startRadiusY = surface.radiusY;
+  dragState.pointerId = event.pointerId;
+  sceneStore.setActiveSurfaceId(surface.id);
+  viewportRef.value?.setPointerCapture(event.pointerId);
+};
+
+// Start dragging ellipse radius-Y handle
+const startEllipseRadiusYDrag = (surface: EllipseSurface, event: PointerEvent) => {
+  if (event.button !== 0) return;
+  if (spacebarHeld.value) {
+    startPan(event);
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  suppressClear.value = true;
+  dragState.mode = "ellipse-radius-y";
+  dragState.surfaceId = surface.id;
+  dragState.startPointer = clientToNormalized(event);
+  dragState.startCenter = { ...surface.center };
+  dragState.startRadiusX = surface.radiusX;
+  dragState.startRadiusY = surface.radiusY;
+  dragState.pointerId = event.pointerId;
+  sceneStore.setActiveSurfaceId(surface.id);
+  viewportRef.value?.setPointerCapture(event.pointerId);
 };
 
 const startRotationDrag = (surface: Surface, event: PointerEvent) => {
@@ -557,19 +675,25 @@ const startRotationDrag = (surface: Surface, event: PointerEvent) => {
     return;
   }
   event.preventDefault();
+  event.stopPropagation();
   suppressClear.value = true;
 
   const center = getSurfaceCenterNorm(surface);
   const pointerPos = clientToNormalized(event);
   const startAngle = Math.atan2(pointerPos.y - center.y, pointerPos.x - center.x);
 
+  // Get vertices safely for polygon surfaces
+  const vertices = isEllipseSurface(surface) ? [] : ("vertices" in surface ? surface.vertices : []);
+
   dragState.mode = "rotation";
   dragState.surfaceId = surface.id;
   dragState.vertexIndex = null;
   dragState.startPointer = pointerPos;
-  dragState.startVertices = surface.vertices.map((vertex) => ({ ...vertex }));
+  dragState.startVertices = vertices.map((vertex) => ({ ...vertex }));
   dragState.startRotation = surface.rotation;
   dragState.startAngle = startAngle;
+  dragState.startCenter = isEllipseSurface(surface) ? { ...surface.center } : null;
+  dragState.pointerId = event.pointerId;
 
   sceneStore.setActiveSurfaceId(surface.id);
   viewportRef.value?.setPointerCapture(event.pointerId);
@@ -583,8 +707,63 @@ const moveDrag = (event: PointerEvent) => {
   const surface = findSurface(dragState.surfaceId);
   if (!surface) return;
 
+  // Handle ellipse-specific drag modes
+  if (isEllipseSurface(surface)) {
+    const current = clientToNormalized(event);
+    const delta = {
+      x: current.x - dragState.startPointer.x,
+      y: current.y - dragState.startPointer.y,
+    };
+
+    if (dragState.mode === "ellipse-center" && dragState.startCenter) {
+      // Move ellipse center (no clamping - allow shapes to extend beyond viewport)
+      surface.center = {
+        x: dragState.startCenter.x + delta.x,
+        y: dragState.startCenter.y + delta.y,
+      };
+      return;
+    }
+
+    if (dragState.mode === "ellipse-radius-x" && dragState.startCenter) {
+      // Adjust horizontal radius based on distance from center
+      const newRadiusX = Math.abs(current.x - dragState.startCenter.x);
+      // Shift: keep aspect ratio (scale both radii proportionally)
+      if (event.shiftKey) {
+        const scale = newRadiusX / dragState.startRadiusX;
+        surface.radiusX = Math.max(newRadiusX, 0.02);
+        surface.radiusY = Math.max(dragState.startRadiusY * scale, 0.02);
+      } else {
+        surface.radiusX = Math.max(newRadiusX, 0.02);
+      }
+      return;
+    }
+
+    if (dragState.mode === "ellipse-radius-y" && dragState.startCenter) {
+      // Adjust vertical radius based on distance from center
+      const newRadiusY = Math.abs(current.y - dragState.startCenter.y);
+      // Shift: keep aspect ratio (scale both radii proportionally)
+      if (event.shiftKey) {
+        const scale = newRadiusY / dragState.startRadiusY;
+        surface.radiusY = Math.max(newRadiusY, 0.02);
+        surface.radiusX = Math.max(dragState.startRadiusX * scale, 0.02);
+      } else {
+        surface.radiusY = Math.max(newRadiusY, 0.02);
+      }
+      return;
+    }
+
+    if (dragState.mode === "rotation" && dragState.startCenter) {
+      // Ellipse rotation
+      const pointerPos = clientToNormalized(event);
+      const currentAngle = Math.atan2(pointerPos.y - dragState.startCenter.y, pointerPos.x - dragState.startCenter.x);
+      const angleDelta = (currentAngle - dragState.startAngle) * (180 / Math.PI);
+      surface.rotation = dragState.startRotation + angleDelta;
+      return;
+    }
+  }
+
   if (dragState.mode === "rotation") {
-    // Calculate rotation based on angle change from center
+    // Calculate rotation based on angle change from center (polygon surfaces)
     const center = getSurfaceCenterNorm({ vertices: dragState.startVertices } as Surface);
     const pointerPos = clientToNormalized(event);
     const currentAngle = Math.atan2(pointerPos.y - center.y, pointerPos.x - center.x);
@@ -649,17 +828,19 @@ const moveDrag = (event: PointerEvent) => {
         const scale = event.shiftKey ? Math.max(scaleX, scaleY) : { x: scaleX, y: scaleY };
         const uniformScale = typeof scale === "number";
 
+        // No clamping - allow shapes to extend beyond viewport
         return {
-          x: clamp(originalCenter.x + (vertex.x - originalCenter.x) * (uniformScale ? scale : scale.x), -1, 1),
-          y: clamp(originalCenter.y + (vertex.y - originalCenter.y) * (uniformScale ? scale : scale.y), -1, 1),
+          x: originalCenter.x + (vertex.x - originalCenter.x) * (uniformScale ? scale : scale.x),
+          y: originalCenter.y + (vertex.y - originalCenter.y) * (uniformScale ? scale : scale.y),
         };
       } else if (dragState.vertexIndex !== index) {
         return vertex;
       }
     }
+    // No clamping - allow shapes to extend beyond viewport
     const newVertex = {
-      x: clamp(vertex.x + delta.x, -1, 1),
-      y: clamp(vertex.y + delta.y, -1, 1),
+      x: vertex.x + delta.x,
+      y: vertex.y + delta.y,
     };
     // Apply snapping only for single vertex drags (not when scaling from center)
     if (dragState.mode === "vertex" && !scaleFromCenter) {
@@ -682,8 +863,18 @@ const moveDrag = (event: PointerEvent) => {
 const endDrag = async () => {
   // Hide crosshair on renderer when vertex drag ends
   const wasVertexDrag = dragState.mode === "vertex";
+  const wasEllipseDrag = dragState.mode?.startsWith("ellipse-");
   if (wasVertexDrag) {
     void rendererStore.showCrosshair(false);
+  }
+
+  // Release pointer capture to prevent "stuck" drag behavior
+  if (dragState.pointerId !== null && viewportRef.value) {
+    try {
+      viewportRef.value.releasePointerCapture(dragState.pointerId);
+    } catch {
+      // Ignore if pointer capture was already released
+    }
   }
 
   if (dragState.mode && activeScene.value) {
@@ -691,9 +882,9 @@ const endDrag = async () => {
   }
   dragState.mode = null;
 
-  // After vertex drag, send scene to renderer immediately if live preview is on
+  // After vertex/ellipse drag, send scene to renderer immediately if live preview is on
   // (we skip updates during drag to avoid video flashing)
-  if (wasVertexDrag && livePreview.value && canPreview.value) {
+  if ((wasVertexDrag || wasEllipseDrag) && livePreview.value && canPreview.value) {
     void previewScene();
   }
   dragState.surfaceId = null;
@@ -702,9 +893,16 @@ const endDrag = async () => {
   dragState.startVertices = [];
   dragState.startRotation = 0;
   dragState.startAngle = 0;
+  dragState.startCenter = null;
+  dragState.startRadiusX = 0;
+  dragState.startRadiusY = 0;
+  dragState.pointerId = null;
 };
 
 const clearSelection = () => {
+  // Always close shape menu on any click in viewport
+  showShapeMenu.value = false;
+
   if (suppressClear.value) {
     suppressClear.value = false;
     return;
@@ -730,13 +928,19 @@ const toPoint = (x: number, y: number) => {
   return `${point.x},${point.y}`;
 };
 
-const surfacePoints = (shape: { vertices: { x: number; y: number }[] }) =>
-  shape.vertices.map((vertex) => toPoint(vertex.x, vertex.y)).join(" ");
+// Get polygon points for any surface (ellipse uses generated vertices)
+const surfacePoints = (surface: Surface) => {
+  const vertices = getSurfaceVertices(surface);
+  return vertices.map((vertex) => toPoint(vertex.x, vertex.y)).join(" ");
+};
 
 // Compute center of the active surface for center point indicator
 const surfaceCenter = computed(() => {
   if (!activeSurface.value) {
     return null;
+  }
+  if (isEllipseSurface(activeSurface.value)) {
+    return toStage(activeSurface.value.center.x, activeSurface.value.center.y);
   }
   const vertices = activeSurface.value.vertices;
   const sumX = vertices.reduce((acc, v) => acc + v.x, 0);
@@ -746,6 +950,25 @@ const surfaceCenter = computed(() => {
     y: sumY / vertices.length,
   };
   return toStage(centerNorm.x, centerNorm.y);
+});
+
+// Ellipse radius handles (for ellipse surfaces)
+const ellipseRadiusHandles = computed(() => {
+  if (!activeSurface.value || !isEllipseSurface(activeSurface.value)) {
+    return null;
+  }
+  const ellipse = activeSurface.value;
+  const center = toStage(ellipse.center.x, ellipse.center.y);
+  // Convert radii from normalized (-1 to 1) to stage coordinates
+  const radiusXStage = ellipse.radiusX * stageWidth * 0.5;
+  const radiusYStage = ellipse.radiusY * stageHeight * 0.5;
+  return {
+    center,
+    radiusXHandle: { x: center.x + radiusXStage, y: center.y },
+    radiusYHandle: { x: center.x, y: center.y + radiusYStage },
+    radiusXStage,
+    radiusYStage,
+  };
 });
 
 // Compute rotation handle position (extends from center)
@@ -770,10 +993,14 @@ const draggedVertexPosition = computed(() => {
     return null;
   }
   const surface = findSurface(dragState.surfaceId);
-  if (!surface || dragState.vertexIndex >= surface.vertices.length) {
+  if (!surface || isEllipseSurface(surface)) {
     return null;
   }
-  const vertex = surface.vertices[dragState.vertexIndex];
+  const vertices = "vertices" in surface ? surface.vertices : [];
+  if (!vertices || dragState.vertexIndex >= vertices.length) {
+    return null;
+  }
+  const vertex = vertices[dragState.vertexIndex];
   return toStage(vertex.x, vertex.y);
 });
 
@@ -799,16 +1026,39 @@ const duplicateSurface = async () => {
     return;
   }
   const offset = 0.05; // Small offset so it's visible
-  const newSurface = createSurface("quad", {
-    feedId: activeSurface.value.feedId,
-    zOrder: activeScene.value.surfaces.length,
-    index: activeScene.value.surfaces.length + 1,
-  });
-  // Copy vertices with offset
-  newSurface.vertices = activeSurface.value.vertices.map((v) => ({
-    x: clamp(v.x + offset, -1, 1),
-    y: clamp(v.y + offset, -1, 1),
-  }));
+
+  let newSurface: Surface;
+
+  if (isEllipseSurface(activeSurface.value)) {
+    // Duplicate ellipse surface
+    newSurface = createSurface("ellipse", {
+      feedId: activeSurface.value.feedId,
+      zOrder: activeScene.value.surfaces.length,
+      index: activeScene.value.surfaces.length + 1,
+    }) as EllipseSurface;
+    // Copy ellipse-specific properties
+    (newSurface as EllipseSurface).center = {
+      x: activeSurface.value.center.x + offset,
+      y: activeSurface.value.center.y + offset,
+    };
+    (newSurface as EllipseSurface).radiusX = activeSurface.value.radiusX;
+    (newSurface as EllipseSurface).radiusY = activeSurface.value.radiusY;
+  } else {
+    // Duplicate polygon surface
+    newSurface = createSurface("quad", {
+      feedId: activeSurface.value.feedId,
+      zOrder: activeScene.value.surfaces.length,
+      index: activeScene.value.surfaces.length + 1,
+    });
+    // Copy vertices with offset
+    if ("vertices" in newSurface) {
+      newSurface.vertices = activeSurface.value.vertices.map((v) => ({
+        x: v.x + offset,
+        y: v.y + offset,
+      }));
+    }
+  }
+
   newSurface.name = `${activeSurface.value.name} Copy`;
   newSurface.opacity = activeSurface.value.opacity;
   newSurface.brightness = activeSurface.value.brightness;
@@ -905,27 +1155,6 @@ const duplicateSurface = async () => {
         :title="spacebarHeld ? 'Pan mode: drag to pan the viewport' : 'Left-click to select surface, drag to move, scroll to zoom. Hold Space + drag to pan'"
         @wheel.prevent="onWheel"
         @pointerdown="startPan"
-        @pointermove="
-          (event) => {
-            if (dragState.mode) {
-              moveDrag(event);
-              return;
-            }
-            movePan(event);
-          }
-        "
-        @pointerup="
-          async () => {
-            endPan();
-            await endDrag();
-          }
-        "
-        @pointercancel="
-          async () => {
-            endPan();
-            await endDrag();
-          }
-        "
         @click="clearSelection"
       >
         <div
@@ -939,6 +1168,7 @@ const duplicateSurface = async () => {
             :width="stageWidth"
             :height="stageHeight"
             viewBox="0 0 1920 1080"
+            overflow="visible"
             role="presentation"
           >
             <!-- Output boundary frame -->
@@ -1063,18 +1293,61 @@ const duplicateSurface = async () => {
               @pointerdown.stop="startShapeDrag(surface, $event)"
             >{{ getSurfaceLabelInfo(surface)?.name }}</text>
 
+            <!-- Polygon vertex handles (only for non-ellipse surfaces) -->
             <circle
-              v-for="(vertex, index) in activeSurface?.vertices ?? []"
+              v-for="(vertex, index) in (activeSurface && !isEllipseSurface(activeSurface)) ? activeSurface.vertices : []"
               :key="`handle-${index}`"
               class="scene-canvas__handle"
               :cx="toStage(vertex.x, vertex.y).x"
               :cy="toStage(vertex.x, vertex.y).y"
               r="18"
-              @pointerdown.stop="startVertexDrag(activeSurface, index, $event)"
+              @pointerdown.stop="startVertexDrag(activeSurface!, index, $event)"
               @click.stop
             >
               <title>Corner {{ index + 1 }} - Drag to adjust</title>
             </circle>
+
+            <!-- Ellipse radius handles -->
+            <g v-if="activeSurface && isEllipseSurface(activeSurface) && ellipseRadiusHandles">
+              <!-- Horizontal radius line -->
+              <line
+                class="scene-canvas__ellipse-radius-line"
+                :x1="ellipseRadiusHandles.center.x"
+                :y1="ellipseRadiusHandles.center.y"
+                :x2="ellipseRadiusHandles.radiusXHandle.x"
+                :y2="ellipseRadiusHandles.radiusXHandle.y"
+              />
+              <!-- Vertical radius line -->
+              <line
+                class="scene-canvas__ellipse-radius-line"
+                :x1="ellipseRadiusHandles.center.x"
+                :y1="ellipseRadiusHandles.center.y"
+                :x2="ellipseRadiusHandles.radiusYHandle.x"
+                :y2="ellipseRadiusHandles.radiusYHandle.y"
+              />
+              <!-- Horizontal radius handle (radiusX) -->
+              <circle
+                class="scene-canvas__ellipse-handle scene-canvas__ellipse-handle--x"
+                :cx="ellipseRadiusHandles.radiusXHandle.x"
+                :cy="ellipseRadiusHandles.radiusXHandle.y"
+                r="14"
+                @pointerdown.stop="startEllipseRadiusXDrag(activeSurface as EllipseSurface, $event)"
+                @click.stop
+              >
+                <title>Horizontal radius - Drag to resize (Shift to constrain)</title>
+              </circle>
+              <!-- Vertical radius handle (radiusY) -->
+              <circle
+                class="scene-canvas__ellipse-handle scene-canvas__ellipse-handle--y"
+                :cx="ellipseRadiusHandles.radiusYHandle.x"
+                :cy="ellipseRadiusHandles.radiusYHandle.y"
+                r="14"
+                @pointerdown.stop="startEllipseRadiusYDrag(activeSurface as EllipseSurface, $event)"
+                @click.stop
+              >
+                <title>Vertical radius - Drag to resize (Shift to constrain)</title>
+              </circle>
+            </g>
 
             <!-- Rotation handle for selected surface -->
             <g v-if="activeSurface && surfaceCenter && rotationHandle">
@@ -1176,28 +1449,62 @@ const duplicateSurface = async () => {
         </div>
 
         <div class="scene-canvas__toolbar" @pointerdown.stop @click.stop>
-          <button
-            type="button"
-            :disabled="!canAddShape"
-            class="scene-canvas__add-btn"
-            title="Add a new surface to the scene"
-            @click="toggleAddMenu"
-          >
-            <svg class="scene-canvas__add-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <!-- Irregular quad shape -->
-              <path d="M4 5L19 3L21 18L6 20Z" stroke-linejoin="round" />
-              <!-- Vertex handles -->
-              <circle cx="4" cy="5" r="2" fill="currentColor" stroke="none" />
-              <circle cx="19" cy="3" r="2" fill="currentColor" stroke="none" />
-              <circle cx="21" cy="18" r="2" fill="currentColor" stroke="none" />
-              <circle cx="6" cy="20" r="2" fill="currentColor" stroke="none" />
-            </svg>
-            <span>Add Shape</span>
-            <svg class="scene-canvas__add-btn-chevron" viewBox="0 0 12 12" fill="currentColor">
-              <path d="M2.5 4.5L6 8L9.5 4.5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </button>
-          <Menu ref="addMenuRef" :model="shapeMenuItems" :popup="true" class="scene-canvas__add-menu" />
+          <div class="scene-canvas__add-dropdown">
+            <button
+              type="button"
+              :disabled="!canAddShape"
+              class="scene-canvas__add-btn"
+              title="Add a new surface to the scene"
+              @click="toggleAddMenu"
+            >
+              <svg class="scene-canvas__add-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <!-- Irregular quad shape -->
+                <path d="M4 5L19 3L21 18L6 20Z" stroke-linejoin="round" />
+                <!-- Vertex handles -->
+                <circle cx="4" cy="5" r="2" fill="currentColor" stroke="none" />
+                <circle cx="19" cy="3" r="2" fill="currentColor" stroke="none" />
+                <circle cx="21" cy="18" r="2" fill="currentColor" stroke="none" />
+                <circle cx="6" cy="20" r="2" fill="currentColor" stroke="none" />
+              </svg>
+              <span>Add Shape</span>
+              <svg class="scene-canvas__add-btn-chevron" viewBox="0 0 12 12" fill="currentColor">
+                <path d="M2.5 4.5L6 8L9.5 4.5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <!-- Custom dropdown menu -->
+            <div v-if="showShapeMenu" class="scene-canvas__shape-menu" @click.stop>
+              <button
+                class="scene-canvas__shape-item"
+                title="Axis-aligned rectangle"
+                @click="addSurface('rectangle'); showShapeMenu = false"
+              >
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2">
+                  <rect x="2" y="3" width="12" height="10" rx="0.5" />
+                </svg>
+                <span>Rectangle</span>
+              </button>
+              <button
+                class="scene-canvas__shape-item"
+                title="Irregular 4-sided polygon for perspective mapping"
+                @click="addSurface('quad'); showShapeMenu = false"
+              >
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2">
+                  <path d="M2 4L13 2L14 13L3 14Z" stroke-linejoin="round" />
+                </svg>
+                <span>Quad</span>
+              </button>
+              <button
+                class="scene-canvas__shape-item"
+                title="Circle or ellipse with adjustable radii"
+                @click="addSurface('ellipse'); showShapeMenu = false"
+              >
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2">
+                  <ellipse cx="8" cy="8" rx="6" ry="5" />
+                </svg>
+                <span>Ellipse</span>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1220,6 +1527,8 @@ const duplicateSurface = async () => {
   gap: 8px;
   height: 100%;
   padding: 8px;
+  overflow: hidden;
+  position: relative;
 }
 
 .scene-canvas__header {
@@ -1227,8 +1536,13 @@ const duplicateSurface = async () => {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding-bottom: 8px;
   border-bottom: 1px solid #2a2a2a;
+  position: relative;
+  z-index: 10;
+  background: #161616;
+  margin: -8px -8px 0 -8px;
+  padding: 8px;
+  padding-bottom: 8px;
 }
 
 .scene-canvas__title {
@@ -1473,6 +1787,8 @@ const duplicateSurface = async () => {
   flex-direction: column;
   gap: 8px;
   flex: 1;
+  overflow: hidden;
+  position: relative;
 }
 
 .scene-canvas__viewport {
@@ -1483,9 +1799,19 @@ const duplicateSurface = async () => {
   margin: 0 auto;
   border-radius: 0;
   background: #0a0a0a;
-  border: 1px solid #2a2a2a;
-  overflow: hidden;
+  overflow: visible;
   touch-action: none;
+  z-index: 1;
+}
+
+/* Border overlay - renders on top of overflowing content */
+.scene-canvas__viewport::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid #2a2a2a;
+  pointer-events: none;
+  z-index: 100;
 }
 
 /* Pan mode cursor when spacebar is held */
@@ -1767,10 +2093,13 @@ const duplicateSurface = async () => {
   position: absolute;
   top: 8px;
   right: 8px;
-  z-index: 2;
+  z-index: 10;
   display: flex;
   align-items: center;
   gap: 6px;
+  background: rgba(10, 10, 10, 0.9);
+  padding: 4px;
+  border-radius: 4px;
 }
 
 .scene-canvas__add-btn {
@@ -1816,39 +2145,57 @@ const duplicateSurface = async () => {
   margin-left: -1px;
 }
 
-.scene-canvas__add-menu :deep(.p-menu) {
-  background: #222;
-  border: 1px solid #333;
-  border-radius: 2px;
+.scene-canvas__add-dropdown {
+  position: relative;
+}
+
+.scene-canvas__shape-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-  min-width: 120px;
-  padding: 4px 0;
+  padding: 4px;
+  z-index: 100;
+  min-width: 90px;
 }
 
-.scene-canvas__add-menu :deep(.p-menu-list) {
-  padding: 0;
-}
-
-.scene-canvas__add-menu :deep(.p-menuitem-link) {
-  padding: 7px 14px;
-  color: #aaa;
-  font-size: 12px;
+.scene-canvas__shape-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  color: #888;
+  font-size: 11px;
+  font-weight: 400;
+  font-family: inherit;
+  cursor: pointer;
   transition: all 0.1s ease;
+  text-align: left;
 }
 
-.scene-canvas__add-menu :deep(.p-menuitem-link:hover) {
+.scene-canvas__shape-item:hover {
   background: rgba(0, 180, 216, 0.1);
   color: #00b4d8;
 }
 
-.scene-canvas__add-menu :deep(.p-menuitem-icon) {
-  color: #666;
-  margin-right: 8px;
-  font-size: 12px;
+.scene-canvas__shape-item svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  opacity: 0.6;
 }
 
-.scene-canvas__add-menu :deep(.p-menuitem-link:hover .p-menuitem-icon) {
-  color: #00b4d8;
+.scene-canvas__shape-item:hover svg {
+  opacity: 1;
+  stroke: #00b4d8;
 }
 
 .scene-canvas__hint {
@@ -1870,5 +2217,31 @@ const duplicateSurface = async () => {
 
 .scene-canvas__message {
   margin: 0;
+}
+
+/* Ellipse radius handles */
+.scene-canvas__ellipse-radius-line {
+  stroke: rgba(0, 180, 216, 0.4);
+  stroke-width: 2;
+  stroke-dasharray: 6 3;
+}
+
+.scene-canvas__ellipse-handle {
+  fill: #1a1a1a;
+  stroke: #00b4d8;
+  stroke-width: 3;
+  cursor: ew-resize;
+  transition: fill 0.15s ease;
+  filter: drop-shadow(0 0 4px rgba(0, 180, 216, 0.5));
+}
+
+.scene-canvas__ellipse-handle--y {
+  cursor: ns-resize;
+}
+
+.scene-canvas__ellipse-handle:hover {
+  fill: #00b4d8;
+  stroke: #fff;
+  filter: drop-shadow(0 0 8px rgba(0, 180, 216, 0.8));
 }
 </style>

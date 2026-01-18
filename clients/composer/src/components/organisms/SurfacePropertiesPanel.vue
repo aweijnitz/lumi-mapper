@@ -9,7 +9,8 @@ import Button from "primevue/button";
 import { useSceneStore } from "../../stores/sceneStore";
 import { useFeedStore } from "../../stores/feedStore";
 import { useRendererStore } from "../../stores/rendererStore";
-import type { Surface } from "../../types/surface";
+import type { Surface, EllipseSurface } from "../../types/surface";
+import { isEllipseSurface } from "../../types/surface";
 
 const sceneStore = useSceneStore();
 const feedStore = useFeedStore();
@@ -27,7 +28,15 @@ const form = reactive({
   blendMode: "Normal" as Surface["blendMode"],
   zOrder: 0,
   rotation: 0,
+  // Ellipse-specific fields
+  centerX: 0,
+  centerY: 0,
+  radiusX: 0.45,
+  radiusY: 0.45,
 });
+
+// Check if active surface is an ellipse
+const isEllipse = computed(() => activeSurface.value && isEllipseSurface(activeSurface.value));
 
 const feedOptions = computed(() =>
   feedStore.feeds.map((feed) => ({ label: feed.name, value: feed.id })),
@@ -58,6 +67,10 @@ const syncForm = (surface: Surface | null) => {
     form.blendMode = "Normal";
     form.zOrder = 0;
     form.rotation = 0;
+    form.centerX = 0;
+    form.centerY = 0;
+    form.radiusX = 0.45;
+    form.radiusY = 0.45;
   } else {
     form.name = surface.name;
     form.feedId = surface.feedId;
@@ -66,6 +79,13 @@ const syncForm = (surface: Surface | null) => {
     form.blendMode = surface.blendMode;
     form.zOrder = surface.zOrder;
     form.rotation = surface.rotation ?? 0;
+    // Ellipse-specific fields
+    if (isEllipseSurface(surface)) {
+      form.centerX = surface.center.x;
+      form.centerY = surface.center.y;
+      form.radiusX = surface.radiusX;
+      form.radiusY = surface.radiusY;
+    }
   }
   void nextTick(() => {
     isSyncing.value = false;
@@ -86,20 +106,35 @@ const scheduleSave = () => {
       return;
     }
 
-    const nextSurfaces = activeScene.value.surfaces.map((surface) =>
-      surface.id === activeSurface.value?.id
-        ? {
-            ...surface,
-            name: form.name.trim(),
-            feedId: form.feedId,
-            opacity: form.opacity,
-            brightness: form.brightness,
-            blendMode: form.blendMode,
-            zOrder: Math.round(form.zOrder),
-            rotation: form.rotation,
-          }
-        : surface,
-    );
+    const nextSurfaces = activeScene.value.surfaces.map((surface) => {
+      if (surface.id !== activeSurface.value?.id) {
+        return surface;
+      }
+
+      // Base properties for all surfaces
+      const baseUpdate = {
+        ...surface,
+        name: form.name.trim(),
+        feedId: form.feedId,
+        opacity: form.opacity,
+        brightness: form.brightness,
+        blendMode: form.blendMode,
+        zOrder: Math.round(form.zOrder),
+        rotation: form.rotation,
+      };
+
+      // Add ellipse-specific properties if it's an ellipse
+      if (isEllipseSurface(surface)) {
+        return {
+          ...baseUpdate,
+          center: { x: form.centerX, y: form.centerY },
+          radiusX: form.radiusX,
+          radiusY: form.radiusY,
+        } as EllipseSurface;
+      }
+
+      return baseUpdate;
+    });
 
     const nextScene = {
       ...activeScene.value,
@@ -159,6 +194,69 @@ const previewFeed = async () => {
             appendTo="self"
             title="Choose which video feed to map onto this surface"
           />
+        </div>
+      </div>
+
+      <!-- Ellipse-specific shape controls -->
+      <div v-if="isEllipse" class="surface-properties__section">
+        <div class="surface-properties__section-title">Shape</div>
+
+        <div class="surface-properties__row">
+          <div class="surface-properties__group">
+            <label class="surface-properties__label" for="ellipse-center-x" title="Horizontal position of ellipse center (-1 to 1)">
+              Center X
+            </label>
+            <InputNumber
+              id="ellipse-center-x"
+              v-model="form.centerX"
+              :min="-1"
+              :max="1"
+              :step="0.05"
+              title="-1 = left edge, 0 = center, 1 = right edge"
+            />
+          </div>
+          <div class="surface-properties__group">
+            <label class="surface-properties__label" for="ellipse-center-y" title="Vertical position of ellipse center (-1 to 1)">
+              Center Y
+            </label>
+            <InputNumber
+              id="ellipse-center-y"
+              v-model="form.centerY"
+              :min="-1"
+              :max="1"
+              :step="0.05"
+              title="-1 = top edge, 0 = center, 1 = bottom edge"
+            />
+          </div>
+        </div>
+
+        <div class="surface-properties__row">
+          <div class="surface-properties__group">
+            <label class="surface-properties__label" for="ellipse-radius-x" title="Horizontal radius (0 to 1)">
+              Radius X
+            </label>
+            <InputNumber
+              id="ellipse-radius-x"
+              v-model="form.radiusX"
+              :min="0.02"
+              :max="1"
+              :step="0.05"
+              title="Horizontal radius from center to edge"
+            />
+          </div>
+          <div class="surface-properties__group">
+            <label class="surface-properties__label" for="ellipse-radius-y" title="Vertical radius (0 to 1)">
+              Radius Y
+            </label>
+            <InputNumber
+              id="ellipse-radius-y"
+              v-model="form.radiusY"
+              :min="0.02"
+              :max="1"
+              :step="0.05"
+              title="Vertical radius from center to edge"
+            />
+          </div>
         </div>
       </div>
 

@@ -1,7 +1,7 @@
 import { createId } from "./useIds";
-import type { Surface, Vec2 } from "../types/surface";
+import type { Surface, Vec2, PolygonSurface, EllipseSurface } from "../types/surface";
 
-export type SurfaceShape = "rectangle" | "quad" | "circle";
+export type SurfaceShape = "rectangle" | "quad" | "ellipse";
 
 type SurfaceFactoryOptions = {
   feedId: string;
@@ -10,21 +10,7 @@ type SurfaceFactoryOptions = {
   index?: number;
 };
 
-// Generate circle vertices as a regular polygon
-const generateCircleVertices = (numPoints: number = 32, radius: number = 0.5): Vec2[] => {
-  const vertices: Vec2[] = [];
-  for (let i = 0; i < numPoints; i++) {
-    // Start from top (-PI/2) and go clockwise
-    const angle = -Math.PI / 2 + (i / numPoints) * 2 * Math.PI;
-    vertices.push({
-      x: Math.cos(angle) * radius,
-      y: Math.sin(angle) * radius,
-    });
-  }
-  return vertices;
-};
-
-const shapeVertices: Record<SurfaceShape, Vec2[]> = {
+const shapeVertices: Record<Exclude<SurfaceShape, "ellipse">, Vec2[]> = {
   rectangle: [
     { x: -0.5, y: -0.5 },
     { x: 0.5, y: -0.5 },
@@ -37,15 +23,14 @@ const shapeVertices: Record<SurfaceShape, Vec2[]> = {
     { x: 0.5, y: 0.55 },
     { x: -0.65, y: 0.45 },
   ],
-  circle: generateCircleVertices(32, 0.45),
 };
 
 const shapeLabel = (shape: SurfaceShape) => {
   switch (shape) {
     case "quad":
       return "Quad";
-    case "circle":
-      return "Circle";
+    case "ellipse":
+      return "Ellipse";
     case "rectangle":
     default:
       return "Rectangle";
@@ -61,11 +46,36 @@ const resolveSurfaceName = (shape: SurfaceShape, options: SurfaceFactoryOptions)
 };
 
 export const createSurface = (shape: SurfaceShape, options: SurfaceFactoryOptions): Surface => {
+  if (shape === "ellipse") {
+    return createEllipseSurface(options);
+  }
+  return createPolygonSurface(shape, options);
+};
+
+const createPolygonSurface = (shape: Exclude<SurfaceShape, "ellipse">, options: SurfaceFactoryOptions): PolygonSurface => {
   const vertices = shapeVertices[shape].map((vertex) => ({ ...vertex }));
   return {
     id: createId("surface"),
     name: resolveSurfaceName(shape, options),
+    surfaceType: "polygon",
     vertices,
+    feedId: options.feedId,
+    opacity: 1,
+    brightness: 1,
+    blendMode: "Normal",
+    zOrder: options.zOrder ?? 0,
+    rotation: 0,
+  };
+};
+
+const createEllipseSurface = (options: SurfaceFactoryOptions): EllipseSurface => {
+  return {
+    id: createId("surface"),
+    name: resolveSurfaceName("ellipse", options),
+    surfaceType: "ellipse",
+    center: { x: 0, y: 0 },
+    radiusX: 0.45,
+    radiusY: 0.45,
     feedId: options.feedId,
     opacity: 1,
     brightness: 1,

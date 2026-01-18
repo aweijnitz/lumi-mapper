@@ -170,13 +170,23 @@ void from_json(const json& j, Feed& feed) {
 void to_json(json& j, const Surface& surface) {
   j = json{{"id", surface.getId().value},
            {"name", surface.getName()},
-           {"vertices", surface.getVertices()},
            {"feedId", surface.getFeedId().value},
            {"opacity", surface.getOpacity()},
            {"brightness", surface.getBrightness()},
            {"blendMode", surface.getBlendMode()},
            {"zOrder", surface.getZOrder()},
            {"rotation", surface.getRotation()}};
+
+  // Surface type-specific serialization
+  if (surface.isEllipse()) {
+    j["surfaceType"] = "ellipse";
+    j["center"] = surface.getCenter();
+    j["radiusX"] = surface.getRadiusX();
+    j["radiusY"] = surface.getRadiusY();
+  } else {
+    j["surfaceType"] = "polygon";
+    j["vertices"] = surface.getVertices();
+  }
 }
 
 void from_json(const json& j, Surface& surface) {
@@ -190,21 +200,42 @@ void from_json(const json& j, Surface& surface) {
   const auto opacity = requireNumber(j, "opacity");
   const auto brightness = requireNumber(j, "brightness");
   const auto blendModeStr = requireString(j, "blendMode");
+  const int zOrder = requireInteger(j, "zOrder");
+  const BlendMode blendMode = parseBlendModeString(blendModeStr);
 
-  const auto& verticesJson = requireField<json>(j, "vertices");
-  if (!verticesJson.is_array()) {
-    throw std::runtime_error("Field 'vertices' must be an array");
-  }
-  std::vector<Vec2> vertices;
-  vertices.reserve(verticesJson.size());
-  for (const auto& vertexJson : verticesJson) {
-    Vec2 vec{};
-    from_json(vertexJson, vec);
-    vertices.push_back(vec);
+  // Check surface type (default to polygon for backwards compatibility)
+  std::string surfaceType = "polygon";
+  if (j.contains("surfaceType") && j["surfaceType"].is_string()) {
+    surfaceType = j["surfaceType"].get<std::string>();
   }
 
-  surface = Surface(SurfaceId{id}, name, vertices, FeedId{feedId}, opacity, brightness,
-                    parseBlendModeString(blendModeStr), requireInteger(j, "zOrder"));
+  if (surfaceType == "ellipse") {
+    // Parse ellipse surface
+    const auto& centerJson = requireField<json>(j, "center");
+    Vec2 center{};
+    from_json(centerJson, center);
+    const float radiusX = requireNumber(j, "radiusX");
+    const float radiusY = requireNumber(j, "radiusY");
+
+    surface = Surface(SurfaceId{id}, name, center, radiusX, radiusY, FeedId{feedId},
+                      opacity, brightness, blendMode, zOrder);
+  } else {
+    // Parse polygon surface (default/legacy)
+    const auto& verticesJson = requireField<json>(j, "vertices");
+    if (!verticesJson.is_array()) {
+      throw std::runtime_error("Field 'vertices' must be an array");
+    }
+    std::vector<Vec2> vertices;
+    vertices.reserve(verticesJson.size());
+    for (const auto& vertexJson : verticesJson) {
+      Vec2 vec{};
+      from_json(vertexJson, vec);
+      vertices.push_back(vec);
+    }
+
+    surface = Surface(SurfaceId{id}, name, vertices, FeedId{feedId}, opacity, brightness,
+                      blendMode, zOrder);
+  }
 
   // Rotation is optional for backward compatibility
   if (j.contains("rotation") && j["rotation"].is_number()) {
