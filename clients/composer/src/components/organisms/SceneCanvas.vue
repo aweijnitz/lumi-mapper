@@ -404,6 +404,22 @@ const closestPointOnEdge = (p: Vec2, edge: { p1: Vec2; p2: Vec2 }): Vec2 => {
   };
 };
 
+// Viewport boundary corners (normalized coordinates -1 to 1)
+const VIEWPORT_CORNERS: Vec2[] = [
+  { x: -1, y: -1 }, // Top-left
+  { x: 1, y: -1 },  // Top-right
+  { x: 1, y: 1 },   // Bottom-right
+  { x: -1, y: 1 },  // Bottom-left
+];
+
+// Viewport boundary edges
+const VIEWPORT_EDGES: { p1: Vec2; p2: Vec2 }[] = [
+  { p1: { x: -1, y: -1 }, p2: { x: 1, y: -1 } },  // Top edge
+  { p1: { x: 1, y: -1 }, p2: { x: 1, y: 1 } },    // Right edge
+  { p1: { x: 1, y: 1 }, p2: { x: -1, y: 1 } },    // Bottom edge
+  { p1: { x: -1, y: 1 }, p2: { x: -1, y: -1 } },  // Left edge
+];
+
 // Apply snapping to a vertex position (vertices take priority over edges)
 const snapVertex = (vertex: Vec2, surfaceId: string): Vec2 => {
   if (!snapEnabled.value) return vertex;
@@ -411,7 +427,7 @@ const snapVertex = (vertex: Vec2, surfaceId: string): Vec2 => {
   let snappedVertex = vertex;
   let minDist = SNAP_THRESHOLD;
 
-  // First, try to snap to other vertices (higher priority)
+  // First, try to snap to other surface vertices (highest priority)
   const otherVertices = getOtherSurfaceVertices(surfaceId);
   for (const otherVertex of otherVertices) {
     const dist = Math.sqrt(
@@ -428,9 +444,42 @@ const snapVertex = (vertex: Vec2, surfaceId: string): Vec2 => {
     return snappedVertex;
   }
 
-  // Otherwise, try to snap to edges
+  // Try to snap to viewport corners (second priority)
+  for (const corner of VIEWPORT_CORNERS) {
+    const dist = Math.sqrt(
+      (vertex.x - corner.x) ** 2 + (vertex.y - corner.y) ** 2
+    );
+    if (dist < minDist) {
+      minDist = dist;
+      snappedVertex = { x: corner.x, y: corner.y };
+    }
+  }
+
+  // If we found a corner snap, use it
+  if (snappedVertex !== vertex) {
+    return snappedVertex;
+  }
+
+  // Try to snap to other surface edges
   const edges = getOtherSurfaceEdges(surfaceId);
   for (const edge of edges) {
+    const closest = closestPointOnEdge(vertex, edge);
+    const dist = Math.sqrt(
+      (vertex.x - closest.x) ** 2 + (vertex.y - closest.y) ** 2
+    );
+    if (dist < minDist) {
+      minDist = dist;
+      snappedVertex = closest;
+    }
+  }
+
+  // If we found a surface edge snap, use it
+  if (snappedVertex !== vertex) {
+    return snappedVertex;
+  }
+
+  // Finally, try to snap to viewport edges (lowest priority)
+  for (const edge of VIEWPORT_EDGES) {
     const closest = closestPointOnEdge(vertex, edge);
     const dist = Math.sqrt(
       (vertex.x - closest.x) ** 2 + (vertex.y - closest.y) ** 2
