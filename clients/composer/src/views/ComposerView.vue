@@ -1149,6 +1149,16 @@ watch(
 
 :deep(.p-button) {
   gap: 6px;
+  justify-content: center;
+}
+
+/* Hide empty icon spans and reset label margin */
+:deep(.p-button .p-button-icon:empty) {
+  display: none;
+}
+
+:deep(.p-button .p-button-label) {
+  margin: 0;
 }
 
 :deep(.p-button-icon-only) {

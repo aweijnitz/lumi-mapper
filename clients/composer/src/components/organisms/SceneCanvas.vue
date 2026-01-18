@@ -1176,15 +1176,27 @@ const duplicateSurface = async () => {
         </div>
 
         <div class="scene-canvas__toolbar" @pointerdown.stop @click.stop>
-          <Button
-            icon="pi pi-plus"
-            label="Add"
-            size="small"
+          <button
+            type="button"
             :disabled="!canAddShape"
             class="scene-canvas__add-btn"
             title="Add a new surface to the scene"
             @click="toggleAddMenu"
-          />
+          >
+            <svg class="scene-canvas__add-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <!-- Irregular quad shape -->
+              <path d="M4 5L19 3L21 18L6 20Z" stroke-linejoin="round" />
+              <!-- Vertex handles -->
+              <circle cx="4" cy="5" r="2" fill="currentColor" stroke="none" />
+              <circle cx="19" cy="3" r="2" fill="currentColor" stroke="none" />
+              <circle cx="21" cy="18" r="2" fill="currentColor" stroke="none" />
+              <circle cx="6" cy="20" r="2" fill="currentColor" stroke="none" />
+            </svg>
+            <span>Add Shape</span>
+            <svg class="scene-canvas__add-btn-chevron" viewBox="0 0 12 12" fill="currentColor">
+              <path d="M2.5 4.5L6 8L9.5 4.5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
           <Menu ref="addMenuRef" :model="shapeMenuItems" :popup="true" class="scene-canvas__add-menu" />
         </div>
       </div>
@@ -1762,24 +1774,46 @@ const duplicateSurface = async () => {
 }
 
 .scene-canvas__add-btn {
-  background: rgba(0, 180, 216, 0.1);
-  border: 1px solid rgba(0, 180, 216, 0.3);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(0, 180, 216, 0.15);
+  border: 1px solid rgba(0, 180, 216, 0.4);
   color: #00b4d8;
   font-size: 11px;
   font-weight: 500;
-  padding: 5px 12px;
+  padding: 5px 8px;
   border-radius: 2px;
   transition: all 0.12s ease;
+  cursor: pointer;
+  font-family: inherit;
 }
 
 .scene-canvas__add-btn:hover:not(:disabled) {
-  background: rgba(0, 180, 216, 0.2);
-  border-color: rgba(0, 180, 216, 0.5);
+  background: rgba(0, 180, 216, 0.25);
+  border-color: rgba(0, 180, 216, 0.6);
   color: #00d4ff;
 }
 
 .scene-canvas__add-btn:disabled {
-  opacity: 0.4;
+  background: rgba(60, 60, 60, 0.3);
+  border-color: #444;
+  color: #555;
+  cursor: not-allowed;
+}
+
+.scene-canvas__add-btn-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.scene-canvas__add-btn-chevron {
+  width: 8px;
+  height: 8px;
+  opacity: 0.6;
+  flex-shrink: 0;
+  margin-left: -1px;
 }
 
 .scene-canvas__add-menu :deep(.p-menu) {
