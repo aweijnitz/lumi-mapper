@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 48">
+  <!-- Icon -->
+  <rect width="48" height="48" rx="8" fill="#00b4d8"/>
+  <path d="M13 10 L13 35 L35 35 L35 29 L19 29 L19 10 Z" fill="#1a1a1a"/>
+
+  <!-- LUMI text -->
+  <text x="60" y="34"
+        font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+        font-size="28"
+        font-weight="700"
+        letter-spacing="0.12em"
+        fill="#00b4d8">LUMI</text>
+</svg>

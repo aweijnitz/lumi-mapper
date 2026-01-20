@@ -165,6 +165,10 @@ const deleteScene = async () => {
     </div>
 
     <template v-else>
+      <div v-if="activeScene" class="scene-section__editing">
+        <i class="pi pi-pencil"></i>
+        <span>Editing: <strong>{{ activeScene.name }}</strong></span>
+      </div>
       <div class="scene-section__form">
         <InputText v-model="name" placeholder="Scene name" />
         <Textarea v-model="description" placeholder="Scene description" rows="2" autoResize />
@@ -223,7 +227,14 @@ const deleteScene = async () => {
         responsiveLayout="scroll"
         size="small"
       >
-        <Column field="name" header="Scene" />
+        <Column field="name" header="Scene">
+          <template #body="{ data }">
+            <span class="scene-section__name" :class="{ 'scene-section__name--editing': activeScene?.id === data.id }">
+              <i v-if="activeScene?.id === data.id" class="pi pi-pencil scene-section__edit-icon"></i>
+              {{ data.name }}
+            </span>
+          </template>
+        </Column>
         <Column field="description" header="Description" />
       </DataTable>
     </template>
@@ -286,5 +297,41 @@ const deleteScene = async () => {
 
 .scene-section__message {
   margin: 0;
+}
+
+.scene-section__editing {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: rgba(0, 180, 216, 0.1);
+  border-radius: 4px;
+  font-size: 12px;
+  color: #999;
+}
+
+.scene-section__editing i {
+  font-size: 10px;
+  color: #00b4d8;
+}
+
+.scene-section__editing strong {
+  color: #00b4d8;
+  font-weight: 500;
+}
+
+.scene-section__name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.scene-section__name--editing {
+  color: #00b4d8;
+}
+
+.scene-section__edit-icon {
+  font-size: 10px;
+  color: #00b4d8;
 }
 </style>

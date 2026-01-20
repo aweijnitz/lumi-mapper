@@ -274,6 +274,18 @@ watch(
     }
   },
 );
+
+// Dynamic document title
+watch(
+  [() => projectStore.activeProject?.name, () => sceneStore.activeScene?.name],
+  ([projectName, sceneName]) => {
+    const parts = ["LUMI"];
+    if (projectName) parts.push(projectName);
+    if (sceneName) parts.push(sceneName);
+    document.title = parts.join(" - ");
+  },
+  { immediate: true },
+);
 </script>
 
 <template>
@@ -413,7 +425,13 @@ watch(
       </SplitterPanel>
 
       <SplitterPanel :size="panelSizes[1]" :minSize="20" class="app-panel app-panel--center">
-        <div class="app-panel__header">Workflow</div>
+        <div class="app-panel__header">
+          <span>Workflow</span>
+          <template v-if="sceneStore.activeScene">
+            <span class="app-panel__header-divider">/</span>
+            <span class="app-panel__header-scene">{{ sceneStore.activeScene.name }}</span>
+          </template>
+        </div>
         <SceneCanvas />
       </SplitterPanel>
 
@@ -963,6 +981,8 @@ watch(
 }
 
 .app-panel__header {
+  display: flex;
+  align-items: center;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -971,6 +991,22 @@ watch(
   padding: 8px 12px;
   background: #1a1a1a;
   border-bottom: 1px solid #2a2a2a;
+}
+
+.app-panel__header-divider {
+  margin: 0 6px;
+  color: #444;
+}
+
+.app-panel__header-scene {
+  color: #00b4d8;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .app-panel__copy {
@@ -1466,12 +1502,17 @@ watch(
 }
 
 :deep(.p-datatable .p-datatable-tbody > tr.p-highlight) {
-  background: rgba(0, 180, 216, 0.1);
+  background: rgba(0, 180, 216, 0.12);
   color: #ddd;
 }
 
+:deep(.p-datatable .p-datatable-tbody > tr.p-highlight > td:first-child) {
+  border-left: 3px solid #00b4d8;
+  padding-left: 9px;
+}
+
 :deep(.p-datatable .p-datatable-tbody > tr.p-highlight:hover) {
-  background: rgba(0, 180, 216, 0.14);
+  background: rgba(0, 180, 216, 0.18);
 }
 
 :deep(.p-datatable .p-datatable-tbody > tr > td) {
