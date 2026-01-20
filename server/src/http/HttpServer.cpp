@@ -50,11 +50,14 @@ std::optional<std::filesystem::path> findAssetsRoot() {
 }
 
 std::string assetTypeForPath(const std::filesystem::path& path) {
-    const auto ext = path.extension().string();
-    if (ext == ".mp4" || ext == ".mov" || ext == ".avi" || ext == ".mkv") {
+    std::string ext = path.extension().string();
+    // Convert to lowercase for case-insensitive comparison
+    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return std::tolower(c); });
+    if (ext == ".mp4" || ext == ".mov" || ext == ".avi" || ext == ".mkv" || ext == ".webm" || ext == ".m4v") {
         return "video";
     }
-    if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".gif") {
+    if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".gif" || ext == ".webp" || ext == ".bmp" ||
+        ext == ".tiff" || ext == ".tif") {
         return "image";
     }
     return "unknown";

@@ -4,7 +4,10 @@
 
 namespace projection::core {
 
-enum class FeedType { VideoFile, Camera, Generated };
+enum class FeedType { VideoFile, ImageFile, Camera, Generated };
+
+// Pan direction for image feeds
+enum class PanDirection { LeftToRight, RightToLeft, PingPong };
 
 enum class BlendMode { Normal, Additive, Multiply };
 
@@ -13,6 +16,8 @@ inline std::string toString(FeedType type) {
   switch (type) {
     case FeedType::VideoFile:
       return "VideoFile";
+    case FeedType::ImageFile:
+      return "ImageFile";
     case FeedType::Camera:
       return "Camera";
     case FeedType::Generated:
@@ -27,12 +32,46 @@ inline bool fromString(const std::string& value, FeedType& outType) {
     outType = FeedType::VideoFile;
     return true;
   }
+  if (value == "ImageFile") {
+    outType = FeedType::ImageFile;
+    return true;
+  }
   if (value == "Camera") {
     outType = FeedType::Camera;
     return true;
   }
   if (value == "Generated") {
     outType = FeedType::Generated;
+    return true;
+  }
+  return false;
+}
+
+// Convert PanDirection to a readable string representation.
+inline std::string toString(PanDirection direction) {
+  switch (direction) {
+    case PanDirection::LeftToRight:
+      return "leftToRight";
+    case PanDirection::RightToLeft:
+      return "rightToLeft";
+    case PanDirection::PingPong:
+      return "pingPong";
+  }
+  return "leftToRight";
+}
+
+// Parse a PanDirection from a string. Returns true on success.
+inline bool fromString(const std::string& value, PanDirection& outDirection) {
+  if (value == "leftToRight") {
+    outDirection = PanDirection::LeftToRight;
+    return true;
+  }
+  if (value == "rightToLeft") {
+    outDirection = PanDirection::RightToLeft;
+    return true;
+  }
+  if (value == "pingPong") {
+    outDirection = PanDirection::PingPong;
     return true;
   }
   return false;

@@ -32,4 +32,46 @@ Feed makeVideoFileFeed(const ProjectId& projectId, const FeedId& id, const std::
   return Feed(projectId, id, name, FeedType::VideoFile, config.dump());
 }
 
+ImageFileConfig parseImageFileConfig(const Feed& feed) {
+  if (feed.getType() != FeedType::ImageFile) {
+    throw std::runtime_error("parseImageFileConfig requires an ImageFile feed");
+  }
+
+  auto json = nlohmann::json::parse(feed.getConfigJson());
+  if (!json.is_object() || !json.contains("filePath") || !json["filePath"].is_string()) {
+    throw std::runtime_error("Invalid ImageFile feed config: missing filePath");
+  }
+
+  ImageFileConfig config;
+  config.filePath = json["filePath"].get<std::string>();
+
+  // Parse optional pan settings with defaults
+  if (json.contains("panDirection") && json["panDirection"].is_string()) {
+    PanDirection dir;
+    if (fromString(json["panDirection"].get<std::string>(), dir)) {
+      config.panDirection = dir;
+    }
+  }
+
+  if (json.contains("panDurationSeconds") && json["panDurationSeconds"].is_number()) {
+    config.panDurationSeconds = json["panDurationSeconds"].get<float>();
+  }
+
+  if (json.contains("visiblePortion") && json["visiblePortion"].is_number()) {
+    config.visiblePortion = std::clamp(json["visiblePortion"].get<float>(), 0.3f, 1.0f);
+  }
+
+  return config;
+}
+
+Feed makeImageFileFeed(const ProjectId& projectId, const FeedId& id, const std::string& name,
+                       const ImageFileConfig& config) {
+  nlohmann::json jsonConfig{
+      {"filePath", config.filePath},
+      {"panDirection", toString(config.panDirection)},
+      {"panDurationSeconds", config.panDurationSeconds},
+      {"visiblePortion", config.visiblePortion}};
+  return Feed(projectId, id, name, FeedType::ImageFile, jsonConfig.dump());
+}
+
 }  // namespace projection::core

@@ -11,6 +11,15 @@ struct VideoFileConfig {
   std::string filePath;
 };
 
+// Configuration for image feeds with pan animation
+// The pan effect shows a portion of the image and slowly pans across it
+struct ImageFileConfig {
+  std::string filePath;
+  PanDirection panDirection = PanDirection::LeftToRight;  // Direction of the pan
+  float panDurationSeconds = 120.0f;                      // Duration for one full pan sweep (default 2 minutes)
+  float visiblePortion = 0.6f;                            // What fraction of image width is visible (0.5-1.0)
+};
+
 class Feed {
  public:
   Feed() = default;
@@ -47,5 +56,9 @@ class Feed {
 VideoFileConfig parseVideoFileConfig(const Feed& feed);
 Feed makeVideoFileFeed(const ProjectId& projectId, const FeedId& id, const std::string& name,
                        const std::string& filePath);
+
+ImageFileConfig parseImageFileConfig(const Feed& feed);
+Feed makeImageFileFeed(const ProjectId& projectId, const FeedId& id, const std::string& name,
+                       const ImageFileConfig& config);
 
 }  // namespace projection::core

@@ -11,7 +11,7 @@ import { useProjectStore } from "../../stores/projectStore";
 import { useFeedStore } from "../../stores/feedStore";
 import { useAssetStore } from "../../stores/assetStore";
 import { createId } from "../../composables/useIds";
-import type { Feed } from "../../types/feed";
+import type { Feed, FeedType } from "../../types/feed";
 
 const projectStore = useProjectStore();
 const feedStore = useFeedStore();
@@ -22,8 +22,18 @@ const name = ref("");
 const selectedAssetPath = ref("");
 const successMessage = ref("");
 
+// Determine feed type based on selected asset
+const selectedFeedType = computed<FeedType>(() => {
+  const asset = assetStore.assets.find(a => a.path === selectedAssetPath.value);
+  return asset?.type === "image" ? "ImageFile" : "VideoFile";
+});
+
 const assetOptions = computed(() =>
-  assetStore.assets.map((asset) => ({ label: asset.name, value: asset.path })),
+  assetStore.assets.map((asset) => ({
+    label: asset.name,
+    value: asset.path,
+    type: asset.type,
+  })),
 );
 
 const hasActiveProject = computed(() => Boolean(projectStore.activeProject));
@@ -97,7 +107,7 @@ const buildPayload = (feedId: string): Feed | null => {
     projectId,
     id: feedId,
     name: name.value.trim(),
-    type: "VideoFile",
+    type: selectedFeedType.value,
     configJson: { filePath: selectedAssetPath.value.trim() },
   };
 };
@@ -167,7 +177,7 @@ const deleteFeed = async () => {
             v-model="name"
             placeholder="e.g., Main Video, Background Loop"
             data-testid="feed-name"
-            title="Enter a descriptive name for this video feed"
+            title="Enter a descriptive name for this feed"
           />
         </div>
         <div class="feed-browser__field">
@@ -182,7 +192,29 @@ const deleteFeed = async () => {
             appendTo="self"
             data-testid="feed-asset"
             title="Select a video or image from your uploaded assets"
-          />
+          >
+            <template #value="{ value, placeholder }">
+              <template v-if="value">
+                <span class="feed-browser__asset-option">
+                  <i :class="assetOptions.find(a => a.value === value)?.type === 'image' ? 'pi pi-image' : 'pi pi-video'" />
+                  {{ assetOptions.find(a => a.value === value)?.label }}
+                  <span :class="['feed-browser__asset-type', `feed-browser__asset-type--${assetOptions.find(a => a.value === value)?.type}`]">
+                    {{ assetOptions.find(a => a.value === value)?.type }}
+                  </span>
+                </span>
+              </template>
+              <span v-else class="feed-browser__asset-placeholder">{{ placeholder }}</span>
+            </template>
+            <template #option="{ option }">
+              <span class="feed-browser__asset-option">
+                <i :class="option.type === 'image' ? 'pi pi-image' : 'pi pi-video'" />
+                {{ option.label }}
+                <span :class="['feed-browser__asset-type', `feed-browser__asset-type--${option.type}`]">
+                  {{ option.type }}
+                </span>
+              </span>
+            </template>
+          </Dropdown>
         </div>
       </div>
 
@@ -250,7 +282,15 @@ const deleteFeed = async () => {
           <template #body="{ data }">
             <span class="feed-browser__name" :class="{ 'feed-browser__name--editing': activeFeed?.id === data.id }">
               <i v-if="activeFeed?.id === data.id" class="pi pi-pencil feed-browser__edit-icon"></i>
+              <i :class="data.type === 'ImageFile' ? 'pi pi-image' : 'pi pi-video'" class="feed-browser__type-icon" />
               {{ data.name }}
+            </span>
+          </template>
+        </Column>
+        <Column header="Type">
+          <template #body="{ data }">
+            <span :class="['feed-browser__feed-type', `feed-browser__feed-type--${data.type}`]">
+              {{ data.type === 'ImageFile' ? 'Image' : 'Video' }}
             </span>
           </template>
         </Column>
@@ -394,5 +434,66 @@ const deleteFeed = async () => {
 .feed-browser__success-enter-from,
 .feed-browser__success-leave-to {
   opacity: 0;
+}
+
+.feed-browser__asset-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.feed-browser__asset-option i {
+  opacity: 0.8;
+}
+
+.feed-browser__asset-type {
+  font-size: 0.75em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  font-weight: 500;
+  margin-left: auto;
+}
+
+.feed-browser__asset-type--image {
+  background: #2d4a2d;
+  color: #8fbc8f;
+}
+
+.feed-browser__asset-type--video {
+  background: #4a2d4a;
+  color: #bc8fbc;
+}
+
+.feed-browser__asset-type--unknown {
+  background: #3a3a3a;
+  color: #888;
+}
+
+.feed-browser__asset-placeholder {
+  color: #666;
+}
+
+.feed-browser__type-icon {
+  opacity: 0.7;
+  font-size: 0.9em;
+}
+
+.feed-browser__feed-type {
+  font-size: 0.75em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+.feed-browser__feed-type--VideoFile {
+  background: #4a2d4a;
+  color: #bc8fbc;
+}
+
+.feed-browser__feed-type--ImageFile {
+  background: #2d4a2d;
+  color: #8fbc8f;
 }
 </style>

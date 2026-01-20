@@ -29,13 +29,16 @@ void ofApp::setup() {
   client_.start();
 
   // Load grayscale shader for monochrome filter
-  // Try multiple paths: openFrameworks looks in data/ by default, but when running
-  // from build directory we may need to look in data/shaders/ directly
-  grayscaleShaderLoaded_ = grayscaleShader_.load("data/shaders/grayscale");
-  if (!grayscaleShaderLoaded_) {
-    // Fallback: try without data/ prefix (in case ofSetDataPathRoot was used)
-    grayscaleShaderLoaded_ = grayscaleShader_.load("shaders/grayscale");
+  // Set the data path to be relative to the executable directory
+  // This ensures shaders are found whether running from build dir or installed location
+  std::string exePath = ofFilePath::getEnclosingDirectory(ofFilePath::getCurrentExeDir());
+  std::string dataPath = ofFilePath::join(ofFilePath::getCurrentExeDir(), "data");
+  ofSetDataPathRoot(dataPath);
+  if (verbose_) {
+    std::cerr << "[renderer] data path set to: " << dataPath << std::endl;
   }
+
+  grayscaleShaderLoaded_ = grayscaleShader_.load("shaders/grayscale");
   if (verbose_) {
     if (grayscaleShaderLoaded_) {
       std::cerr << "[renderer] grayscale shader loaded successfully" << std::endl;
@@ -152,12 +155,14 @@ void ofApp::draw() {
   ofBackground(0, 0, 0);
   ofSetColor(255, 255, 255);
 
-  // Draw loaded video feeds onto their skewed surfaces using textured meshes.
+  // Draw loaded feeds (video and images) onto their skewed surfaces using textured meshes.
   const auto& scene = renderState_.currentScene();
   const auto& videoFeeds = renderState_.videoFeeds();
+  auto& imageFeeds = renderState_.imageFeeds();  // non-const for pan state updates
 
   const float screenW = static_cast<float>(ofGetWidth());
   const float screenH = static_cast<float>(ofGetHeight());
+  const float currentTime = ofGetElapsedTimef();
 
   // Surface index counter for unique color assignment per surface
   int surfaceIndex = 0;
@@ -175,9 +180,31 @@ void ofApp::draw() {
   ofScale(audioScale_, audioScale_);
   ofTranslate(-screenW / 2.0f, -screenH / 2.0f);
 
+  // Debug: log available feeds once per scene load
+  static std::string lastSceneId;
+  if (scene.getId().value != lastSceneId) {
+    lastSceneId = scene.getId().value;
+    std::cerr << "[renderer] Scene loaded: " << scene.getId().value
+              << " with " << scene.getSurfaces().size() << " surfaces, "
+              << videoFeeds.size() << " video feeds, "
+              << imageFeeds.size() << " image feeds" << std::endl;
+    for (const auto& s : scene.getSurfaces()) {
+      std::cerr << "[renderer]   Surface " << s.getId().value << " -> feedId=" << s.getFeedId().value << std::endl;
+    }
+    for (const auto& [id, _] : imageFeeds) {
+      std::cerr << "[renderer]   ImageFeed available: " << id << std::endl;
+    }
+  }
+
   for (const auto& surface : scene.getSurfaces()) {
-    auto feedIt = videoFeeds.find(surface.getFeedId().value);
-    if (feedIt == videoFeeds.end()) {
+    // Check if this surface uses a video feed or image feed
+    auto videoFeedIt = videoFeeds.find(surface.getFeedId().value);
+    auto imageFeedIt = imageFeeds.find(surface.getFeedId().value);
+
+    const bool hasVideoFeed = (videoFeedIt != videoFeeds.end());
+    const bool hasImageFeed = (imageFeedIt != imageFeeds.end());
+
+    if (!hasVideoFeed && !hasImageFeed) {
       surfaceIndex++;  // Still increment to maintain consistent coloring
       continue;
     }
@@ -185,8 +212,30 @@ void ofApp::draw() {
     // Each surface gets its own unique color from the palette
     const int currentSurfaceIndex = surfaceIndex++;
 
-    auto& player = feedIt->second.player;
-    if (!player.isLoaded() || player.getTexture().getTextureData().textureID == 0) {
+    // Get texture dimensions based on feed type
+    float feedW = 0.0f;
+    float feedH = 0.0f;
+    const ofTexture* texturePtr = nullptr;
+
+    if (hasVideoFeed) {
+      auto& player = videoFeedIt->second.player;
+      if (!player.isLoaded() || player.getTexture().getTextureData().textureID == 0) {
+        continue;
+      }
+      feedW = player.getWidth();
+      feedH = player.getHeight();
+      texturePtr = &player.getTexture();
+    } else if (hasImageFeed) {
+      auto& imageResource = imageFeedIt->second;
+      if (!imageResource.image.isAllocated()) {
+        continue;
+      }
+      feedW = static_cast<float>(imageResource.image.getWidth());
+      feedH = static_cast<float>(imageResource.image.getHeight());
+      texturePtr = &imageResource.image.getTexture();
+    }
+
+    if (feedW <= 0.0f || feedH <= 0.0f || texturePtr == nullptr || !texturePtr->isAllocated()) {
       continue;
     }
 
@@ -220,9 +269,8 @@ void ofApp::draw() {
       minY = std::min(minY, v.y);
       maxY = std::max(maxY, v.y);
     }
-    const float videoW = player.getWidth();
-    const float videoH = player.getHeight();
-    if (videoW <= 0.0f || videoH <= 0.0f || maxX <= minX || maxY <= minY) {
+
+    if (maxX <= minX || maxY <= minY) {
       continue;
     }
 
@@ -233,16 +281,65 @@ void ofApp::draw() {
     const float cosR = std::cos(rotationRad);
     const float sinR = std::sin(rotationRad);
 
+    // Calculate pan offset for image feeds
+    float panOffsetU = 0.0f;
+    float visiblePortionW = feedW;  // How much of the image width is visible
+
+    if (hasImageFeed) {
+      auto& imageResource = imageFeedIt->second;
+
+      // Calculate visible portion width
+      visiblePortionW = feedW * imageResource.visiblePortion;
+
+      // Calculate maximum pan distance (remaining width after visible portion)
+      const float panRange = feedW - visiblePortionW;
+
+      if (panRange > 0.0f && imageResource.panDurationSeconds > 0.0f) {
+        // Calculate elapsed time since pan started
+        float elapsed = currentTime - imageResource.panStartTime;
+
+        // Calculate normalized pan position (0 to 1)
+        float panProgress = std::fmod(elapsed, imageResource.panDurationSeconds) / imageResource.panDurationSeconds;
+
+        // Apply direction
+        switch (imageResource.panDirection) {
+          case projection::core::PanDirection::LeftToRight:
+            panOffsetU = panProgress * panRange;
+            break;
+          case projection::core::PanDirection::RightToLeft:
+            panOffsetU = (1.0f - panProgress) * panRange;
+            break;
+          case projection::core::PanDirection::PingPong: {
+            // Ping-pong: 0->1->0 over the duration
+            // Use a triangle wave: 2 * |progress - 0.5| gives 1->0->1, invert for 0->1->0
+            float triangleWave = 1.0f - 2.0f * std::abs(panProgress - 0.5f);
+            panOffsetU = triangleWave * panRange;
+            break;
+          }
+        }
+      }
+    }
+
     // Calculate center of texture region for rotation pivot
-    const float centerU = videoW * 0.5f;
-    const float centerV = videoH * 0.5f;
+    // For images with pan, adjust the center based on the visible portion
+    const float centerU = hasImageFeed ? (panOffsetU + visiblePortionW * 0.5f) : (feedW * 0.5f);
+    const float centerV = feedH * 0.5f;
 
     ofMesh mesh;
     mesh.setMode(OF_PRIMITIVE_TRIANGLE_FAN);
     for (const auto& v : screenVerts) {
       // Map screen position to texture coordinates
-      float u = ofMap(v.x, minX, maxX, 0.0f, videoW, true);
-      float t = ofMap(v.y, minY, maxY, 0.0f, videoH, true);
+      float u, t;
+
+      if (hasImageFeed) {
+        // For images: map to the visible portion with pan offset
+        u = ofMap(v.x, minX, maxX, panOffsetU, panOffsetU + visiblePortionW, true);
+        t = ofMap(v.y, minY, maxY, 0.0f, feedH, true);
+      } else {
+        // For video: map to full texture
+        u = ofMap(v.x, minX, maxX, 0.0f, feedW, true);
+        t = ofMap(v.y, minY, maxY, 0.0f, feedH, true);
+      }
 
       // Apply rotation around texture center
       if (std::abs(rotationDeg) > 0.01f) {
@@ -267,10 +364,7 @@ void ofApp::draw() {
     const bool useMonochrome = sceneSettings.filter == projection::core::SceneFilter::Monochrome ||
                                (sceneSettings.filter == projection::core::SceneFilter::None && monochromeEnabled_ && !colorTintEnabled_);
 
-    auto& texture = player.getTexture();
-    if (!texture.isAllocated()) {
-      continue;
-    }
+    const ofTexture& texture = *texturePtr;
 
     if (useColorTint) {
       // Apply tint color per-surface: each surface gets a unique color from the palette
@@ -304,7 +398,7 @@ void ofApp::draw() {
       mesh.draw();
       texture.unbind();
     } else {
-      // No filter - render video in full color (white tint preserves original colors)
+      // No filter - render in full color (white tint preserves original colors)
       // Brightness is applied uniformly to all channels
       const int brightnessValue = static_cast<int>(std::round(brightness * 255.0f));
       ofSetColor(brightnessValue, brightnessValue, brightnessValue, alphaValue);

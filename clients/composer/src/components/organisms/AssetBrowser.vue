@@ -94,8 +94,24 @@ const deleteSelected = async () => {
       class="asset-browser__table"
       size="small"
     >
-      <Column field="name" header="Asset" />
-      <Column field="type" header="Type" />
+      <Column field="name" header="Asset">
+        <template #body="{ data }">
+          <span class="asset-browser__name">
+            <i
+              :class="data.type === 'image' ? 'pi pi-image' : 'pi pi-video'"
+              class="asset-browser__icon"
+            />
+            {{ data.name }}
+          </span>
+        </template>
+      </Column>
+      <Column field="type" header="Type">
+        <template #body="{ data }">
+          <span :class="['asset-browser__type', `asset-browser__type--${data.type}`]">
+            {{ data.type === 'image' ? 'Image' : data.type === 'video' ? 'Video' : 'Unknown' }}
+          </span>
+        </template>
+      </Column>
       <Column field="path" header="Path" />
     </DataTable>
   </div>
@@ -123,5 +139,39 @@ const deleteSelected = async () => {
 
 .asset-browser__message {
   margin: 0;
+}
+
+.asset-browser__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.asset-browser__icon {
+  font-size: 1rem;
+  opacity: 0.8;
+}
+
+.asset-browser__type {
+  font-size: 0.85em;
+  padding: 2px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+.asset-browser__type--image {
+  background: #2d4a2d;
+  color: #8fbc8f;
+}
+
+.asset-browser__type--video {
+  background: #4a2d4a;
+  color: #bc8fbc;
+}
+
+.asset-browser__type--unknown {
+  background: #3a3a3a;
+  color: #888;
 }
 </style>

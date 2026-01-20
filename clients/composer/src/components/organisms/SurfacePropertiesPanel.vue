@@ -39,7 +39,7 @@ const form = reactive({
 const isEllipse = computed(() => activeSurface.value && isEllipseSurface(activeSurface.value));
 
 const feedOptions = computed(() =>
-  feedStore.feeds.map((feed) => ({ label: feed.name, value: feed.id })),
+  feedStore.feeds.map((feed) => ({ label: feed.name, value: feed.id, type: feed.type })),
 );
 
 const blendOptions: Surface["blendMode"][] = ["Normal", "Additive", "Multiply"];
@@ -181,8 +181,8 @@ const previewFeed = async () => {
         </div>
 
         <div class="surface-properties__group">
-          <label class="surface-properties__label" for="surface-feed" title="Video feed to display on this surface">
-            Video Feed
+          <label class="surface-properties__label" for="surface-feed" title="Feed to display on this surface">
+            Feed
           </label>
           <Dropdown
             id="surface-feed"
@@ -192,8 +192,30 @@ const previewFeed = async () => {
             optionValue="value"
             placeholder="Select a feed"
             appendTo="self"
-            title="Choose which video feed to map onto this surface"
-          />
+            title="Choose which feed to map onto this surface"
+          >
+            <template #value="{ value, placeholder }">
+              <template v-if="value">
+                <span class="surface-properties__feed-option">
+                  <i :class="feedOptions.find(f => f.value === value)?.type === 'ImageFile' ? 'pi pi-image' : 'pi pi-video'" />
+                  {{ feedOptions.find(f => f.value === value)?.label }}
+                  <span :class="['surface-properties__feed-type', `surface-properties__feed-type--${feedOptions.find(f => f.value === value)?.type}`]">
+                    {{ feedOptions.find(f => f.value === value)?.type === 'ImageFile' ? 'Image' : 'Video' }}
+                  </span>
+                </span>
+              </template>
+              <span v-else class="surface-properties__feed-placeholder">{{ placeholder }}</span>
+            </template>
+            <template #option="{ option }">
+              <span class="surface-properties__feed-option">
+                <i :class="option.type === 'ImageFile' ? 'pi pi-image' : 'pi pi-video'" />
+                {{ option.label }}
+                <span :class="['surface-properties__feed-type', `surface-properties__feed-type--${option.type}`]">
+                  {{ option.type === 'ImageFile' ? 'Image' : 'Video' }}
+                </span>
+              </span>
+            </template>
+          </Dropdown>
         </div>
       </div>
 
@@ -488,5 +510,39 @@ const previewFeed = async () => {
 
 :deep(.p-inputnumber) {
   width: 100%;
+}
+
+/* Feed option with type badge */
+.surface-properties__feed-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.surface-properties__feed-option i {
+  opacity: 0.8;
+}
+
+.surface-properties__feed-type {
+  font-size: 0.7em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  font-weight: 500;
+  margin-left: auto;
+}
+
+.surface-properties__feed-type--VideoFile {
+  background: #4a2d4a;
+  color: #bc8fbc;
+}
+
+.surface-properties__feed-type--ImageFile {
+  background: #2d4a2d;
+  color: #8fbc8f;
+}
+
+.surface-properties__feed-placeholder {
+  color: #666;
 }
 </style>
