@@ -16,7 +16,10 @@ beforeEach(() => {
 });
 
 it("ping updates lastStatus", async () => {
-  globalThis.fetch = mockFetch(200, { status: "ok", renderers: ["main"] }) as unknown as typeof fetch;
+  globalThis.fetch = mockFetch(200, {
+    status: "ok",
+    renderers: [{ name: "main", width: 1920, height: 1080 }],
+  }) as unknown as typeof fetch;
 
   const store = useRendererStore();
   await store.ping();

@@ -13,9 +13,13 @@ The Renderer is the real-time visual engine that runs on a machine attached to a
   - `LoadScene` / `LoadSceneDefinition` — load scene and referenced feeds
   - `SetFeedForSurface` — change feed on a surface
   - `PlayCue` — playback cue-related overrides
+  - `ShowTestPattern` — toggle calibration grid overlay
+  - `ShowCrosshair` — show/hide alignment crosshair
 - Load video feeds (VideoFile-type) and manage looping playback via `ofVideoPlayer`.
+- Load image feeds (ImageFile-type) with pan animation settings.
 - Render feeds to skewed surfaces using textured meshes, mapping normalized scene coordinates (-1..1) to screen pixels.
 - Apply audio energy smoothing to scale the output and (optionally) map MIDI CC to brightness.
+- Apply scene-level filter settings (color tint / monochrome). When the scene filter is `none`, local keyboard toggles apply.
 
 Implementation notes:
 - Core renderer logic: `src/ofApp.cpp` and `src/RenderState.cpp`.
@@ -63,10 +67,25 @@ Command-line flags (also available via environment variables):
 - `--verbose` (enable verbose logging)
 - `--disable-audio` / `--no-audio` or env `RENDERER_DISABLE_AUDIO` (disable audio input)
 - `--connect-retries` or env `RENDERER_CONNECT_RETRIES` (default `10`)
+- `--fullscreen` / `--windowed` or env `RENDERER_FULLSCREEN` (default windowed)
+- `--display` or env `RENDERER_DISPLAY` (display index, 0 = primary)
+- `--width` / `--height` or env `RENDERER_WIDTH` / `RENDERER_HEIGHT`
+- `--resolution WxH` (sets width/height in one flag)
 
 Behavioral notes:
 - If audio initialization fails the renderer logs a warning and continues without audio.
 - The renderer prints status (connected server, current scene, last command, errors) in the application window.
+- Calibration grid can be toggled via `ShowTestPattern` or the `G` key (off → solid → overlay).
+- Crosshair overlay auto-hides if no updates arrive (used during vertex dragging).
+
+Keyboard shortcuts (in the renderer window):
+- `G` cycle calibration grid (off/solid/overlay)
+- `M` toggle monochrome filter
+- `T` toggle color tint
+- `D` toggle dramatic mode
+- `P` cycle color palette
+- `I` toggle debug info
+- `V` toggle verbose logging
 
 ---
 

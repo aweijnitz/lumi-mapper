@@ -47,6 +47,14 @@ std::string requireString(const json& j, const std::string& key) {
   return field.get<std::string>();
 }
 
+int requireInt(const json& j, const std::string& key) {
+  const auto& field = requireField(j, key);
+  if (!field.is_number_integer()) {
+    throw std::runtime_error("Field '" + key + "' must be an integer");
+  }
+  return field.get<int>();
+}
+
 }  // namespace
 
 void to_json(json& j, const RendererMessageType& type) { j = toString(type); }
@@ -59,7 +67,11 @@ void from_json(const json& j, RendererMessageType& type) {
 }
 
 void to_json(json& j, const HelloMessage& message) {
-  j = json{{"version", message.version}, {"role", message.role}, {"name", message.name}};
+  j = json{{"version", message.version},
+           {"role", message.role},
+           {"name", message.name},
+           {"width", message.width},
+           {"height", message.height}};
 }
 
 void from_json(const json& j, HelloMessage& message) {
@@ -69,6 +81,8 @@ void from_json(const json& j, HelloMessage& message) {
   message.version = requireString(j, "version");
   message.role = requireString(j, "role");
   message.name = requireString(j, "name");
+  message.width = requireInt(j, "width");
+  message.height = requireInt(j, "height");
 }
 
 void to_json(json& j, const AckMessage& message) { j = json{{"commandId", message.commandId}}; }

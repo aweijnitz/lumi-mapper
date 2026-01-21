@@ -1,6 +1,11 @@
 # lumi-composer
 
-Projection Composer UI (Vue 3 + PrimeVue) for managing projects, scenes, feeds, surfaces, cues, and playback.
+Projection Composer UI (Vue 3 + PrimeVue) for managing projects, scenes (including surfaces), feeds, cues, assets, and playback.
+
+Key runtime features:
+- Renderer status (ping) and live preview controls.
+- Calibration grid toggle and crosshair overlay for surface alignment.
+- Scene filter controls (color tint / monochrome) and palette selection.
 
 ## Recommended IDE Setup
 

@@ -2,9 +2,9 @@
 
 A modular, open-source **projection/video mapping engine** written primarily in **C++**, designed to run on **Raspberry Pi** and **macOS**.
 
-__Highights__
+__Highlights__
 
-- Render multiple real-time **video feeds** onto **skewed rectangles/quads/meshes**.
+- Render multiple real-time **video/image feeds** onto **polygon/ellipse surfaces**.
 - Control playback and parameters via **MIDI**, **audio input energy**, and **remote clients**.
 - Persist **scenes, surfaces, feeds, cues** and configuration in an **embedded SQLite3** database file.
 - Use a **client–server model** so the machine connected to the projector can be controlled from other devices.
@@ -20,37 +20,47 @@ The project is a C++-centric monorepo with four main components:
 
 - **`/core` – Core Library**
   - Pure C++ domain model and logic.
-  - Knows about: Scenes, Surfaces, Feeds, Cues, Layers, Playback state.
-  - Provides JSON serialization (via nlohmann::json) and validation helpers for the domain entities.
+  - Knows about: Projects, Scenes (filter settings), Surfaces (polygon/ellipse, blend, rotation, z-order), Feeds, Cues.
+  - Provides JSON serialization (via nlohmann::json), renderer protocol structs, and validation helpers for the domain entities.
   - No rendering, DB, or networking dependencies.
 
 - **`/server` – Server**
   - C++ server built on top of the core library.
   - Persists state to **SQLite3 (embedded, file-based)** and manages asset metadata.
   - Exposes a **remote API** over TCP/IP for clients.
-  - Talks to the Renderer via a local **control protocol** (JSON over TCP in v0).
+  - Talks to the Renderer via a local **control protocol** (newline-delimited JSON over TCP).
+  - Serves assets (`/assets`), renderer status/controls (`/renderer/*`), and demo helpers (`/demo/*`).
 
 - **`/renderer` – Renderer**
   - C++ application using **openFrameworks** (optional `ofxMidi` addon).
   - Runs on the machine that is physically connected to the **projector**.
   - Receives commands from the server and renders scenes in real time.
+  - Supports video + image feeds, scene-level filters, calibration grid, and crosshair overlay.
 
 - **`/clients` – Clients**
-  - C++ CLI and/or GUI tools.
+  - C++ command line client (`clients/commandlineclient`) and Composer UI (`clients/composer`, Vue 3).
   - Talk only to the **server** via its remote API.
-  - Used to manage scenes, feeds, surfaces, cues, and playback.
+  - Used to manage projects, scenes (including surfaces), feeds, cues, assets, and playback.
 
 Assets (images, video files, etc.) are stored on the filesystem (e.g. `./data/assets`), while structured state lives in an embedded SQLite3 database file under `./data/db`.
 
 ### Core library capabilities
 
 - Domain classes for IDs/enums plus Feed, Surface, Scene, and Cue.
-- JSON serialization/deserialization for the main entities and helper types.
+- JSON serialization/deserialization for the main entities and helper types (including renderer protocol messages).
 - Validation helpers to confirm references between surfaces, feeds, scenes, and cues.
+- Scene settings (filters) and surface geometry (polygon + ellipse, rotation, blend modes).
 
 ---
 
-## Planned features
+## Renderer visual features (current)
+
+- **Scene filters**: monochrome + color tint (palette-based).
+- **Calibration grid**: test pattern overlay toggled from Composer or keyboard.
+- **Crosshair overlay**: alignment aid for vertex dragging in Composer.
+- **Image feeds** with pan animation (direction + duration).
+
+## Roadmap
 
 - **FFT analysis** to drive visual modulation from audio.
 - **LFO modulation** for time-based parameter animation.
@@ -63,9 +73,9 @@ Assets (images, video files, etc.) are stored on the filesystem (e.g. `./data/as
 The core library models a few key entities that the server, renderer, and clients share:
 
 - **Project** – show-level container with cue ordering and settings (controllers, MIDI channels, globals).
-- **Feed** – a project-scoped source of pixels (video file, camera, generated content) with configuration metadata.
-- **Surface** – a quad/mesh within a Scene; references a Feed by id with blend/opacity/brightness controls.
-- **Scene** – a project-scoped collection of Surfaces configured together for playback.
+- **Feed** – a project-scoped source of pixels (video or image file, camera, generated content) with configuration metadata. The renderer currently loads VideoFile and ImageFile feeds.
+- **Surface** – a polygon/ellipse within a Scene; references a Feed by id with blend/opacity/brightness/rotation controls.
+- **Scene** – a project-scoped collection of Surfaces plus scene-level filter settings.
 - **Cue** – a project-scoped reference to a Scene with optional per-surface opacity/brightness overrides.
 
 ```mermaid
@@ -173,7 +183,8 @@ OPENFRAMEWORKS_DIR=/Users/aweijnitz/openFrameworks/of_v0.12.1_osx_release ./scri
 
 - The server uses an embedded **SQLite3** database file and will create the DB on first run if it does not already exist.
 - Configuration is provided via command-line flags: `--db <path>` for the SQLite file location and `--port <port>` for the HTTP listener.
-- If you pull schema changes, delete the SQLite file to reset state (no automatic migrations yet).
+- Schema migrations are applied automatically at startup; delete the SQLite file only if you need a clean slate.
+- Asset APIs read/write files under `./data/assets` (or parent directories if running from a subfolder).
 
 ```bash
 # Start the server with explicit configuration
@@ -204,13 +215,13 @@ curl -X POST http://localhost:8080/api/projects \
 
 curl -X POST http://localhost:8080/api/projects/project-1/feeds \
   -H "Content-Type: application/json" \
-  -d '{"projectId":"project-1","id":"feed-1","name":"Camera","type":"Camera","configJson":"{}"}'
+  -d '{"projectId":"project-1","id":"feed-1","name":"Clip A","type":"VideoFile","configJson":{"filePath":"data/assets/clipA.mp4"}}'
 
 curl http://localhost:8080/api/projects/project-1/feeds
 
 curl -X POST http://localhost:8080/api/projects/project-1/scenes \
   -H "Content-Type: application/json" \
-  -d '{"projectId":"project-1","id":"scene-1","name":"Main","description":"Example scene","surfaces":[]}'
+  -d '{"projectId":"project-1","id":"scene-1","name":"Main","description":"Example scene","surfaces":[],"settings":{"filter":"none","colorPaletteIndex":0}}'
 
 curl http://localhost:8080/api/projects/project-1/scenes
 ```
@@ -255,6 +266,10 @@ Renderer connection notes:
 - Use `--connect-retries <N>` or `RENDERER_CONNECT_RETRIES` to override.
 - Use `--disable-audio` or `--no-audio` (or `RENDERER_DISABLE_AUDIO=1`) to skip audio input setup.
 - Use `--verbose` to log connection attempts and handshake status.
+- Window/display options:
+  - `--fullscreen` / `--windowed` or `RENDERER_FULLSCREEN` (default windowed).
+  - `--display <index>` or `RENDERER_DISPLAY` (0 = primary).
+  - `--width <w>`, `--height <h>`, or `--resolution WxH` (or `RENDERER_WIDTH`/`RENDERER_HEIGHT`).
 
 Full example (all settings):
 
@@ -276,10 +291,25 @@ curl -X POST http://localhost:8080/api/renderer/ping
 # Load a scene that already exists in the server DB
 curl -X POST http://localhost:8080/api/projects/project-1/renderer/loadScene \
   -H "Content-Type: application/json" \
-  -d '{"sceneId":"1"}'
+  -d '{"sceneId":"scene-1"}'
+
+# Play a cue by id (cue must exist in the project)
+curl -X POST http://localhost:8080/api/projects/project-1/renderer/playCue \
+  -H "Content-Type: application/json" \
+  -d '{"cueId":"cue-1"}'
+
+# Toggle calibration grid on renderers
+curl -X POST http://localhost:8080/api/renderer/testPattern \
+  -H "Content-Type: application/json" \
+  -d '{"enabled":true}'
+
+# Show crosshair at a normalized position (-1..1)
+curl -X POST http://localhost:8080/api/renderer/crosshair \
+  -H "Content-Type: application/json" \
+  -d '{"enabled":true,"x":0.2,"y":-0.1}'
 ```
 
-The renderer draws video feeds mapped to surfaces and overlays status text (last command, scene, and errors).
+The renderer draws video/image feeds mapped to surfaces and overlays status text (last command, scene, and errors).
 
 ### Example(two videos + MIDI/audio)
 
@@ -290,7 +320,7 @@ Follow this minimal recipe to see the full end-to-end chain (server + renderer +
    ./scripts/build_all.sh
    ```
 
-2. **Prepare demo assets** – place two small MP4 clips at `./data/assets/clipA.mp4` and `./data/assets/clipB.mp4`.
+2. **Prepare demo assets** – ensure `./data/assets/clipA.mp4` and `./data/assets/clipB.mp4` exist (the repo includes sample clips).
 
 3. **Start the server** (HTTP API on 8080; listens for renderer connections on 5050):
    ```bash

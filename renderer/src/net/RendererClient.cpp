@@ -31,16 +31,90 @@ RendererClient::RendererClient(RendererCommandHandler& handler,
 
 RendererClient::~RendererClient() { stop(); }
 
+void RendererClient::setInitialDimensions(int width, int height) {
+  std::lock_guard<std::mutex> lock(helloMutex_);
+  lastWidth_ = width;
+  lastHeight_ = height;
+  hasDimensions_ = true;
+  hasPendingResize_ = false;
+}
+
+void RendererClient::updateDimensions(int width, int height) {
+  {
+    std::lock_guard<std::mutex> lock(helloMutex_);
+    if (hasDimensions_ && width == lastWidth_ && height == lastHeight_) {
+      return;
+    }
+    lastWidth_ = width;
+    lastHeight_ = height;
+    hasDimensions_ = true;
+    hasPendingResize_ = true;
+  }
+
+  if (verbose_) {
+    std::cerr << "[renderer] queued resize update " << width << "x" << height << std::endl;
+  }
+  sendPendingDimensions();
+}
+
+void RendererClient::sendPendingDimensions() {
+  int width = 0;
+  int height = 0;
+  {
+    std::lock_guard<std::mutex> lock(helloMutex_);
+    if (!hasPendingResize_) {
+      return;
+    }
+    width = lastWidth_;
+    height = lastHeight_;
+  }
+
+  int socketFd = kInvalidSocket;
+  {
+    std::lock_guard<std::mutex> lock(socketMutex_);
+    socketFd = socketFd_;
+  }
+  if (socketFd == kInvalidSocket) {
+    if (verbose_) {
+      std::cerr << "[renderer] resize update pending until socket reconnects" << std::endl;
+    }
+    return;
+  }
+
+  projection::core::RendererMessage hello{};
+  hello.type = projection::core::RendererMessageType::Hello;
+  hello.commandId = generateCommandId();
+  hello.hello = projection::core::HelloMessage{"0.1", "renderer", name_, width, height};
+  if (verbose_) {
+    std::cerr << "[renderer] sending resize update " << width << "x" << height << std::endl;
+  }
+  try {
+    sendMessage(hello);
+  } catch (const std::exception& ex) {
+    if (verbose_) {
+      std::cerr << "[renderer] resize update failed: " << ex.what() << std::endl;
+    }
+    return;
+  }
+
+  std::lock_guard<std::mutex> lock(helloMutex_);
+  if (lastWidth_ == width && lastHeight_ == height) {
+    hasPendingResize_ = false;
+  }
+}
+
 void RendererClient::start() {
   if (running_) {
     return;
   }
+  handshakeComplete_ = false;
   running_ = true;
   clientThread_ = std::thread(&RendererClient::run, this);
 }
 
 void RendererClient::stop() {
   running_ = false;
+  handshakeComplete_ = false;
   {
     std::lock_guard<std::mutex> lock(socketMutex_);
     if (socketFd_ != kInvalidSocket) {
@@ -133,10 +207,18 @@ void RendererClient::run() {
     return;
   }
 
+  int width = 0;
+  int height = 0;
+  {
+    std::lock_guard<std::mutex> lock(helloMutex_);
+    width = lastWidth_;
+    height = lastHeight_;
+  }
+
   projection::core::RendererMessage hello{};
   hello.type = projection::core::RendererMessageType::Hello;
   hello.commandId = generateCommandId();
-  hello.hello = projection::core::HelloMessage{"0.1", "renderer", name_};
+  hello.hello = projection::core::HelloMessage{"0.1", "renderer", name_, width, height};
 
   sendMessage(hello);
 
@@ -149,6 +231,8 @@ void RendererClient::run() {
       socketFd = socketFd_;
     }
     if (socketFd == kInvalidSocket) {
+      handshakeComplete_ = true;
+      sendPendingDimensions();
       break;
     }
 

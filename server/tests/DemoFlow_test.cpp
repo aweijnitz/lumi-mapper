@@ -117,7 +117,7 @@ private:
         core::RendererMessage hello{};
         hello.type = core::RendererMessageType::Hello;
         hello.commandId = "cmd-hello";
-        hello.hello = core::HelloMessage{"0.1", "renderer", name_};
+        hello.hello = core::HelloMessage{"0.1", "renderer", name_, 1920, 1080};
         std::string payload = nlohmann::json(hello).dump() + "\n";
         ::send(socketFd_, payload.c_str(), payload.size(), 0);
 

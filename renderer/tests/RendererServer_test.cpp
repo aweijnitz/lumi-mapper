@@ -23,7 +23,7 @@ RendererMessage sampleHelloMessage() {
   RendererMessage message{};
   message.type = RendererMessageType::Hello;
   message.commandId = "cmd-1";
-  message.hello = projection::core::HelloMessage{"1.0.0", "renderer", "stage-left"};
+  message.hello = projection::core::HelloMessage{"1.0.0", "renderer", "stage-left", 1920, 1080};
   return message;
 }
 

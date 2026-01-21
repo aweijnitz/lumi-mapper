@@ -216,6 +216,7 @@ TEST_CASE("RendererClient connects, sends hello, and acknowledges commands", "[r
   }
   projection::renderer::RendererClient client(handler, "127.0.0.1", server.port(), "studio-a", true);
 
+  client.setInitialDimensions(1280, 720);
   client.start();
   REQUIRE(handler.waitForMessage());
 
@@ -223,6 +224,8 @@ TEST_CASE("RendererClient connects, sends hello, and acknowledges commands", "[r
   REQUIRE(hello.type == RendererMessageType::Hello);
   REQUIRE(hello.hello.has_value());
   REQUIRE(hello.hello->name == "studio-a");
+  REQUIRE(hello.hello->width == 1280);
+  REQUIRE(hello.hello->height == 720);
 
   auto received = handler.lastMessage();
   REQUIRE(received.has_value());

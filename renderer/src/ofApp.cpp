@@ -26,6 +26,9 @@ void ofApp::setup() {
   if (verbose_) {
     std::cerr << "[renderer] connecting to server " << host_ << ":" << port_ << " as " << name_ << std::endl;
   }
+  lastWindowWidth_ = ofGetWidth();
+  lastWindowHeight_ = ofGetHeight();
+  client_.setInitialDimensions(lastWindowWidth_, lastWindowHeight_);
   client_.start();
 
   // Load grayscale shader for monochrome filter
@@ -90,7 +93,32 @@ void ofApp::setup() {
   }
 }
 
+void ofApp::windowResized(int w, int h) {
+  if (verbose_) {
+    std::cerr << "[renderer] window resized to " << w << "x" << h << std::endl;
+  }
+  lastWindowWidth_ = w;
+  lastWindowHeight_ = h;
+  client_.updateDimensions(w, h);
+}
+
+void ofApp::checkWindowDimensions() {
+  const int width = ofGetWidth();
+  const int height = ofGetHeight();
+  if (width != lastWindowWidth_ || height != lastWindowHeight_) {
+    if (verbose_) {
+      std::cerr << "[renderer] window size changed to " << width << "x" << height << std::endl;
+    }
+    lastWindowWidth_ = width;
+    lastWindowHeight_ = height;
+    client_.updateDimensions(width, height);
+  }
+}
+
 void ofApp::update() {
+  // Try to send any pending resize updates (e.g., fullscreen toggle that happened before handshake)
+  client_.sendPendingDimensions();
+  checkWindowDimensions();
   if (!client_.running()) {
     const std::string serverError = client_.lastError();
     if (!serverError.empty()) {

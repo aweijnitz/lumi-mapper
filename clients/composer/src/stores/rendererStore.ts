@@ -1,9 +1,15 @@
 import { defineStore } from "pinia";
 import { requestJson, resolveErrorMessage } from "../composables/useApiClient";
 
+export type RendererInfo = {
+  name: string;
+  width: number;
+  height: number;
+};
+
 export type RendererStatus = {
   status: string;
-  renderers: string[];
+  renderers: RendererInfo[];
 };
 
 export const useRendererStore = defineStore("renderer", {
@@ -13,12 +19,18 @@ export const useRendererStore = defineStore("renderer", {
     lastStatus: null as RendererStatus | null,
     testPatternEnabled: false,
   }),
+  getters: {
+    primaryRenderer: (state) => state.lastStatus?.renderers?.[0] ?? null,
+  },
   actions: {
     async ping() {
       this.isLoading = true;
       this.error = null;
       try {
-        const status = await requestJson<RendererStatus>("/api/renderer/ping", { method: "GET" });
+        const status = await requestJson<RendererStatus>("/api/renderer/ping", {
+          method: "GET",
+          cache: "no-store",
+        });
         this.lastStatus = status ?? null;
       } catch (error) {
         this.error = resolveErrorMessage(error, "Renderer not available.");

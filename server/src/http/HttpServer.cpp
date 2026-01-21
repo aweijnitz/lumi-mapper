@@ -675,14 +675,20 @@ void HttpServer::registerRoutes() {
             return;
         }
 
-        const auto names = rendererRegistry_->rendererNames();
-        if (names.empty()) {
+        const auto renderers = rendererRegistry_->rendererInfo();
+        if (renderers.empty()) {
             respondWithError(res, 503, "No renderers connected");
             return;
         }
 
+        json rendererPayload = json::array();
+        for (const auto& renderer : renderers) {
+            rendererPayload.push_back(
+                json{{"name", renderer.name}, {"width", renderer.width}, {"height", renderer.height}});
+        }
+
         res.status = 200;
-        res.set_content(json({{"status", "ok"}, {"renderers", names}}).dump(), "application/json");
+        res.set_content(json({{"status", "ok"}, {"renderers", rendererPayload}}).dump(), "application/json");
     };
 
     registerPost("/renderer/ping", handleRendererPing);

@@ -37,7 +37,10 @@ onMounted(() => {
     </div>
 
     <ul v-else class="renderer-browser__list">
-      <li v-for="renderer in renderers" :key="renderer">{{ renderer }}</li>
+      <li v-for="renderer in renderers" :key="renderer.name">
+        <span class="renderer-browser__name">{{ renderer.name }}</span>
+        <span class="renderer-browser__dimensions">{{ renderer.width }}×{{ renderer.height }}</span>
+      </li>
     </ul>
 
     <div class="renderer-browser__shortcuts">
@@ -46,8 +49,9 @@ onMounted(() => {
       <div class="renderer-browser__shortcut"><kbd>M</kbd> Toggle monochrome filter</div>
       <div class="renderer-browser__shortcut"><kbd>T</kbd> Toggle color tint</div>
       <div class="renderer-browser__shortcut"><kbd>D</kbd> Toggle dramatic mode</div>
-      <div class="renderer-browser__shortcut"><kbd>1-5</kbd> Switch color palette</div>
+      <div class="renderer-browser__shortcut"><kbd>P</kbd> Cycle color palette</div>
       <div class="renderer-browser__shortcut"><kbd>I</kbd> Toggle debug info</div>
+      <div class="renderer-browser__shortcut"><kbd>V</kbd> Toggle verbose logging</div>
     </div>
   </div>
 </template>
@@ -76,6 +80,20 @@ onMounted(() => {
 
 .renderer-browser__list li {
   padding: 2px 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.renderer-browser__name {
+  font-weight: 600;
+  color: #cfe8ef;
+}
+
+.renderer-browser__dimensions {
+  font-size: 11px;
+  color: #7fd3e3;
 }
 
 .renderer-browser__empty {

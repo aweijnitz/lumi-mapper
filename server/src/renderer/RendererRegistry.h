@@ -16,6 +16,12 @@ class RendererSession;
 
 class RendererRegistry {
 public:
+    struct RendererInfo {
+        std::string name;
+        int width;
+        int height;
+    };
+
     explicit RendererRegistry(bool verbose = false);
     ~RendererRegistry();
 
@@ -28,6 +34,7 @@ public:
     bool running() const { return running_; }
     int port() const { return port_; }
     std::vector<std::string> rendererNames() const;
+    std::vector<RendererInfo> rendererInfo() const;
     size_t rendererCount() const;
 
     size_t broadcastMessage(const projection::core::RendererMessage& message);
@@ -44,6 +51,7 @@ private:
     std::thread serverThread_{};
     mutable std::mutex sessionsMutex_{};
     std::unordered_map<std::string, std::shared_ptr<RendererSession>> sessions_{};
+    std::unordered_map<std::string, RendererInfo> rendererInfo_{};
 };
 
 }  // namespace projection::server::renderer

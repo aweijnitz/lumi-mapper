@@ -13,15 +13,15 @@
 This project is a **projection/video mapping engine** that:
 
 - Runs on **Raspberry Pi** and **macOS**.
-- Renders multiple video/graphics feeds onto skewed surfaces (rectangles, quads, meshes) in real time on a **projector**.
+- Renders multiple video/graphics feeds onto skewed surfaces (polygons, ellipses) in real time on a **projector**.
 - Is **interactive**, driven by **MIDI**, **audio input energy**, and remote control via **client/server APIs**.
 - Persists scenes, cues, and configuration in an **embedded SQLite3** database file and stores media assets on the filesystem.
 
 High-level goals:
 
-- A **core C++ library** encapsulating domain logic (scenes, surfaces, feeds, cues, playback).
+- A **core C++ library** encapsulating domain logic (projects, scenes, surfaces, feeds, cues, scene settings).
 - A **C++ server** exposing a **remote API** (over TCP/IP) using the core library.
-- One or more **C++ clients** (CLI, UI, etc.) using that API.
+- One or more clients (C++ CLI plus a Vue-based Composer UI) using that API.
 - A **C++ rendering engine** that connects to the projector and executes scenes in real time.
 - **Projects** group cues and show-level configuration (controllers, MIDI channels, globals) into an ordered show file.
 
@@ -37,8 +37,9 @@ The repo is structured as a C++-oriented monorepo with four main components:
 1. **Core Library (`/core`)**
    - Language: **C++17+**.
    - Responsibility: Domain model & logic only. No networking, no rendering, no DB.
-   - Knows about: Scenes, Surfaces, Feeds, Layers, Cues, Playback state.
-   - Includes: JSON serialization helpers and validation utilities for IDs and the main entities.
+   - Knows about: Projects, Scenes (with per-scene filter settings), Surfaces (polygon/ellipse, rotation, blend mode, z-order),
+     Feeds (VideoFile/ImageFile/Camera/Generated), Cues (surface overrides).
+   - Includes: JSON serialization helpers, renderer protocol message types, and validation utilities for IDs and the main entities.
    - Used by: Server and (optionally) headless tools/clients.
 
 2. **Server (`/server`)**
@@ -59,15 +60,16 @@ The repo is structured as a C++-oriented monorepo with four main components:
    - Language: **C++** using **openFrameworks** + addons (e.g. `ofxMidi`).
    - Responsibility:
      - Real-time rendering of scenes on the projector display.
-     - Handle MIDI input, audio input, and apply LFOs.
-     - Render multiple video feeds mapped to skewed rectangles/quads/meshes.
+     - Handle MIDI input and audio input energy.
+     - Render multiple video/image feeds mapped to polygon/ellipse surfaces.
+     - Support scene-level filters (color tint / monochrome), test pattern grid, and crosshair overlay.
    - Communicates with the Server via a local **control protocol**.
 
 4. **Clients (`/clients/...`)**
-   - Primary implementations: **C++** (e.g. CLI via standard C++ + a networking library).
+   - Primary implementations: **C++** CLI (`/clients/commandlineclient`) and a Vue 3 Composer SPA (`/clients/composer`).
    - Responsibilities:
-     - Connect to the Server over TCP/IP.
-     - Manage scenes, feeds, surfaces, cues, and playback.
+     - Connect to the Server over HTTP+JSON.
+     - Manage projects, scenes (including surfaces), feeds, cues, assets, and playback.
    - Must **never talk directly to the Renderer or DB**.
 
 ### 2.1 Data Flow Overview
@@ -88,6 +90,7 @@ The repo is structured as a C++-oriented monorepo with four main components:
     - “Update Surface #23 vertices”
     - “Switch Feed of Surface #10 to `feedId=xyz`”
     - “Play / Pause / Seek cue X”
+    - “Show test pattern grid” and “Show crosshair overlay”
   - Renderer processes commands and updates its internal representation.
 
 - **Renderer → Server**
@@ -100,23 +103,34 @@ The repo is structured as a C++-oriented monorepo with four main components:
 > **Renderer protocol & inputs:**
 > - `LoadSceneDefinition` is a supported control message for sending a full Scene plus the referenced Feeds in one payload.
 > - Renderer control messages include project-scoped ids (e.g., `projectId` alongside scene/cue/feed ids).
-> - `Hello` payloads from renderers must include a unique `name` field; the server uses this to register each renderer.
+> - `Hello` payloads from renderers include `version`, `role`, a unique `name`, and the renderer `width`/`height`; the server uses `name` to register each renderer and track dimensions for previews.
+> - Renderer protocol also supports `ShowTestPattern` (calibration grid) and `ShowCrosshair` (drag alignment).
 > - The renderer consumes MIDI via `ofxMidi` (e.g., CC #1 mapped to brightness) and audio input energy to modulate scale.
 
 ### 2.2 Project Model & API Surface
 - **Project fields:** `id`, `name`, `description`, ordered `cueOrder`, and `settings` (controllers map, MIDI channels, global config key/values).
 - **Scoped entities:** `Feed`, `Scene`, and `Cue` are all scoped by `projectId`; IDs are unique within a project.
-- **Persistence:** tables `projects`, `feeds`, `scenes`, `cues`, and `project_cues` are keyed by `project_id` in SQLite.
+- **Scene fields:** `surfaces[]` plus `settings` (filter, palette index).
+- **Surface fields:** type (`Polygon` or `Ellipse`), vertices or center/radii, rotation (degrees), blend mode, z-order, opacity/brightness.
+- **Feed types:** `VideoFile`, `ImageFile` (with pan settings), `Camera`, `Generated` (renderer currently loads VideoFile/ImageFile).
+- **Persistence:** tables `projects`, `feeds`, `scenes`, `surfaces`, `cues`, and `project_cues` are keyed by `project_id` in SQLite.
 - **Validation:** project references must point to existing cues in the same project; MIDI channels limited to 1–16; controller names/targets must be non-empty.
 - **HTTP API:** 
   - `GET /projects` list projects, `GET /projects/{id}` fetch one.
   - `POST /projects` create, `PUT /projects/{id}` update (id enforced from path), `DELETE /projects/{id}` remove.
-- `GET/POST/PUT/DELETE /projects/{projectId}/feeds|scenes|cues` manage project-scoped entities (payloads include `projectId`).
+- `GET/POST/PUT/DELETE /projects/{projectId}/feeds` (with `PUT/DELETE` on `/projects/{projectId}/feeds/{feedId}`).
+- `GET/POST/PUT/DELETE /projects/{projectId}/scenes` (with `GET/PUT/DELETE` on `/projects/{projectId}/scenes/{sceneId}`).
+- `GET/POST/PUT/DELETE /projects/{projectId}/cues` (with `PUT/DELETE` on `/projects/{projectId}/cues/{cueId}`).
 - `POST /projects/{projectId}/renderer/loadScene` loads a scene from the specified project.
 - `POST /projects/{projectId}/renderer/playCue` loads the cue's scene (including cue surface overrides) on the renderer.
 - `GET /assets` lists filesystem assets (same under `/api/assets`) to populate the Composer asset browser.
 - `POST /assets` uploads an asset (multipart/form-data `file`, 2GB max).
 - `DELETE /assets/{name}` removes an asset by filename.
+- `GET/POST /renderer/ping` returns connected renderer names and dimensions.
+- `POST /renderer/testPattern` toggles calibration grid on renderers.
+- `POST /renderer/crosshair` shows/hides a crosshair overlay at a normalized position.
+- `POST /demo/two-video-test` builds a temporary demo project and loads it on the renderer.
+- `POST /demo/clear-projects` removes demo projects (`demo-*`).
 - Cue deletion is blocked when the cue is referenced by the same project.
 - The server accepts both `/api/...` and root-level `/...` paths for the HTTP API.
 

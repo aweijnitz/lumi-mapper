@@ -34,6 +34,9 @@ class RendererClient {
   int port() const { return port_; }
   const std::string& name() const { return name_; }
   int connectRetries() const { return connectRetries_; }
+  void setInitialDimensions(int width, int height);
+  void updateDimensions(int width, int height);
+  void sendPendingDimensions();
 
  private:
   void run();
@@ -56,6 +59,12 @@ class RendererClient {
   mutable std::mutex errorMutex_{};
   std::string lastError_{};
   std::mutex socketMutex_{};
+  std::atomic<bool> handshakeComplete_{false};
+  mutable std::mutex helloMutex_{};
+  int lastWidth_{0};
+  int lastHeight_{0};
+  bool hasDimensions_{false};
+  bool hasPendingResize_{false};
 };
 
 }  // namespace projection::renderer

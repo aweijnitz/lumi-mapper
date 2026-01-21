@@ -5,6 +5,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <functional>
 #include <iostream>
 #include <vector>
@@ -46,11 +47,13 @@ public:
     RendererSession(std::string name,
                     int socketFd,
                     bool verbose,
-                    std::function<void(const std::string&)> onDisconnect)
+                    std::function<void(const std::string&)> onDisconnect,
+                    std::function<void(const projection::core::HelloMessage&)> onHello)
         : name_(std::move(name)),
           socketFd_(socketFd),
           verbose_(verbose),
-          onDisconnect_(std::move(onDisconnect)) {}
+          onDisconnect_(std::move(onDisconnect)),
+          onHello_(std::move(onHello)) {}
 
     ~RendererSession() { stop(); }
 
@@ -122,6 +125,19 @@ private:
                 if (verbose_) {
                     std::cerr << "[renderer-registry] received from " << name_ << ": " << line << std::endl;
                 }
+                if (onHello_) {
+                    try {
+                        auto message = parseRendererMessageLine(line);
+                        if (message.type == projection::core::RendererMessageType::Hello && message.hello) {
+                            onHello_(*message.hello);
+                        }
+                    } catch (const std::exception& ex) {
+                        if (verbose_) {
+                            std::cerr << "[renderer-registry] failed to parse message from " << name_ << ": " << ex.what()
+                                      << std::endl;
+                        }
+                    }
+                }
                 newlinePos = buffer.find('\n');
             }
         }
@@ -136,6 +152,7 @@ private:
     std::atomic<bool> running_{false};
     bool verbose_{false};
     std::function<void(const std::string&)> onDisconnect_{};
+    std::function<void(const projection::core::HelloMessage&)> onHello_{};
     std::thread readerThread_{};
     std::mutex sendMutex_{};
 };
@@ -180,16 +197,30 @@ void RendererRegistry::stop() {
 std::vector<std::string> RendererRegistry::rendererNames() const {
     std::lock_guard<std::mutex> lock(sessionsMutex_);
     std::vector<std::string> names;
-    names.reserve(sessions_.size());
-    for (const auto& [name, _] : sessions_) {
+    names.reserve(rendererInfo_.size());
+    for (const auto& [name, _] : rendererInfo_) {
         names.push_back(name);
     }
+    std::sort(names.begin(), names.end());
     return names;
+}
+
+std::vector<RendererRegistry::RendererInfo> RendererRegistry::rendererInfo() const {
+    std::lock_guard<std::mutex> lock(sessionsMutex_);
+    std::vector<RendererInfo> info;
+    info.reserve(rendererInfo_.size());
+    for (const auto& [_, renderer] : rendererInfo_) {
+        info.push_back(renderer);
+    }
+    std::sort(info.begin(), info.end(), [](const RendererInfo& a, const RendererInfo& b) {
+        return a.name < b.name;
+    });
+    return info;
 }
 
 size_t RendererRegistry::rendererCount() const {
     std::lock_guard<std::mutex> lock(sessionsMutex_);
-    return sessions_.size();
+    return rendererInfo_.size();
 }
 
 size_t RendererRegistry::broadcastMessage(const projection::core::RendererMessage& message) {
@@ -299,9 +330,24 @@ void RendererRegistry::handleClient(int clientFd) {
             }
 
             auto session = std::make_shared<RendererSession>(
-                hello.name, clientFd, verbose_, [this](const std::string& name) {
+                hello.name, clientFd, verbose_,
+                [this](const std::string& name) {
                     std::lock_guard<std::mutex> lock(sessionsMutex_);
                     sessions_.erase(name);
+                    rendererInfo_.erase(name);
+                },
+                [this, name = hello.name](const projection::core::HelloMessage& updatedHello) {
+                    std::lock_guard<std::mutex> lock(sessionsMutex_);
+                    auto infoIt = rendererInfo_.find(name);
+                    if (infoIt != rendererInfo_.end()) {
+                        if ((infoIt->second.width != updatedHello.width || infoIt->second.height != updatedHello.height) &&
+                            verbose_) {
+                            std::cerr << "[renderer-registry] renderer '" << name << "' resized to "
+                                      << updatedHello.width << "x" << updatedHello.height << std::endl;
+                        }
+                        infoIt->second.width = updatedHello.width;
+                        infoIt->second.height = updatedHello.height;
+                    }
                 });
             {
                 std::lock_guard<std::mutex> lock(sessionsMutex_);
@@ -312,6 +358,7 @@ void RendererRegistry::handleClient(int clientFd) {
                     return;
                 }
                 sessions_.emplace(hello.name, session);
+                rendererInfo_.emplace(hello.name, RendererInfo{hello.name, hello.width, hello.height});
             }
 
             auto ack = makeAckMessage(message.commandId);

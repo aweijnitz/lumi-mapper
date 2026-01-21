@@ -42,9 +42,12 @@ struct HelloMessage {
   std::string version;
   std::string role;
   std::string name;
+  int width{0};
+  int height{0};
 
   bool operator==(const HelloMessage& other) const {
-    return version == other.version && role == other.role && name == other.name;
+    return version == other.version && role == other.role && name == other.name && width == other.width &&
+           height == other.height;
   }
 };
 

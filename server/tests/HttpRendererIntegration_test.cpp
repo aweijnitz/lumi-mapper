@@ -119,7 +119,7 @@ private:
         core::RendererMessage hello{};
         hello.type = core::RendererMessageType::Hello;
         hello.commandId = "cmd-hello";
-        hello.hello = core::HelloMessage{"0.1", "renderer", name_};
+        hello.hello = core::HelloMessage{"0.1", "renderer", name_, 1920, 1080};
         std::string payload = nlohmann::json(hello).dump() + "\n";
         ::send(socketFd_, payload.c_str(), payload.size(), 0);
 
@@ -264,7 +264,9 @@ TEST_CASE("Renderer ping endpoint talks to renderer", "[http][renderer]") {
     auto payload = nlohmann::json::parse(res->body);
     REQUIRE(payload.contains("renderers"));
     REQUIRE(payload["renderers"].is_array());
-    REQUIRE(payload["renderers"][0].get<std::string>() == "renderer-main");
+    REQUIRE(payload["renderers"][0]["name"].get<std::string>() == "renderer-main");
+    REQUIRE(payload["renderers"][0]["width"].get<int>() == 1920);
+    REQUIRE(payload["renderers"][0]["height"].get<int>() == 1080);
 
     std::filesystem::remove(dbPath);
 }

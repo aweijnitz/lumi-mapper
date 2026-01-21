@@ -10,7 +10,7 @@ TEST_CASE("RendererProtocol round trip Hello", "[RendererProtocol]") {
   RendererMessage message{};
   message.type = RendererMessageType::Hello;
   message.commandId = "cmd-hello";
-  message.hello = HelloMessage{"0.1.0", "renderer", "stage-left"};
+  message.hello = HelloMessage{"0.1.0", "renderer", "stage-left", 1920, 1080};
 
   json j = message;
   auto parsed = j.get<RendererMessage>();

@@ -83,6 +83,50 @@ docker run --rm -p 8080:8080 -v $(pwd)/data/db:/data/db lumi_server:local
 
 ---
 
+## HTTP API overview
+
+The server accepts both `/api/...` and root-level `/...` paths.
+
+Project CRUD:
+- `GET /projects`
+- `GET /projects/{id}`
+- `POST /projects`
+- `PUT /projects/{id}`
+- `DELETE /projects/{id}`
+
+Project-scoped entities:
+- `GET /projects/{projectId}/feeds`
+- `POST /projects/{projectId}/feeds`
+- `PUT /projects/{projectId}/feeds/{feedId}`
+- `DELETE /projects/{projectId}/feeds/{feedId}`
+- `GET /projects/{projectId}/scenes`
+- `GET /projects/{projectId}/scenes/{sceneId}`
+- `POST /projects/{projectId}/scenes`
+- `PUT /projects/{projectId}/scenes/{sceneId}`
+- `DELETE /projects/{projectId}/scenes/{sceneId}`
+- `GET /projects/{projectId}/cues`
+- `POST /projects/{projectId}/cues`
+- `PUT /projects/{projectId}/cues/{cueId}`
+- `DELETE /projects/{projectId}/cues/{cueId}`
+
+Renderer control:
+- `GET /renderer/ping` / `POST /renderer/ping`
+- `POST /projects/{projectId}/renderer/loadScene`
+- `POST /projects/{projectId}/renderer/playCue`
+- `POST /renderer/testPattern` (toggle calibration grid)
+- `POST /renderer/crosshair` (show/hide crosshair overlay)
+
+Assets:
+- `GET /assets` (lists assets under `./data/assets`, `../data/assets`, or `../../data/assets`)
+- `POST /assets` (multipart upload field name `file`, 2GB max)
+- `DELETE /assets/{name}`
+
+Demo helpers:
+- `POST /demo/two-video-test`
+- `POST /demo/clear-projects`
+
+---
+
 ## Tests
 
 Unit and integration tests live under `server/tests` and are built as `lumi_server_tests`.

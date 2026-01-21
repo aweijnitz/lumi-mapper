@@ -35,6 +35,7 @@ class ofApp : public ofBaseApp,
   void update() override;
   void draw() override;
   void exit() override;
+  void windowResized(int w, int h) override;
 
 #if PROJECTION_HAS_OFX_MIDI
   void audioIn(ofSoundBuffer& input) override;
@@ -46,6 +47,7 @@ class ofApp : public ofBaseApp,
   void handle(const projection::core::RendererMessage& message) override;
 
  private:
+  void checkWindowDimensions();
   void updateStatusForHello(const projection::core::HelloMessage& hello, const std::string& commandId);
   void updateStatusForLoadScene(const projection::core::LoadSceneMessage& loadScene,
                                 const std::string& commandId);
@@ -71,6 +73,8 @@ class ofApp : public ofBaseApp,
   std::string sceneId_;
   std::string rendererRole_;
   std::string rendererVersion_;
+  int lastWindowWidth_{0};
+  int lastWindowHeight_{0};
 
 #if PROJECTION_HAS_OFX_MIDI
   ofxMidiIn midiIn_{};

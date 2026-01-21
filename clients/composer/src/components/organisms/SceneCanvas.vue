@@ -65,8 +65,12 @@ const showProjectorGrid = ref(false);
 // Spacebar modifier for panning (hold spacebar + drag to pan)
 const spacebarHeld = ref(false);
 
-const stageWidth = 1920;
-const stageHeight = 1080;
+const fallbackWidth = 1920;
+const fallbackHeight = 1080;
+const stageWidth = computed(() => rendererStore.primaryRenderer?.width ?? fallbackWidth);
+const stageHeight = computed(() => rendererStore.primaryRenderer?.height ?? fallbackHeight);
+const stageViewBox = computed(() => `0 0 ${stageWidth.value} ${stageHeight.value}`);
+const stageLabel = computed(() => `${stageWidth.value}×${stageHeight.value}`);
 const zoomLabel = computed(() => `${Math.round(zoom.value * 100)}%`);
 const hasActiveScene = computed(() => Boolean(activeScene.value));
 const hasFeeds = computed(() => feedStore.feeds.length > 0);
@@ -239,8 +243,8 @@ const handleKeyUp = (event: KeyboardEvent) => {
 const centerViewport = () => {
   if (!viewportRef.value) return;
   const rect = viewportRef.value.getBoundingClientRect();
-  const scaledWidth = stageWidth * zoom.value;
-  const scaledHeight = stageHeight * zoom.value;
+  const scaledWidth = stageWidth.value * zoom.value;
+  const scaledHeight = stageHeight.value * zoom.value;
   panX.value = (rect.width - scaledWidth) / 2;
   panY.value = (rect.height - scaledHeight) / 2;
 };
@@ -252,8 +256,8 @@ const fitToView = () => {
   const padding = 40; // Padding around the stage
   const availableWidth = rect.width - padding * 2;
   const availableHeight = rect.height - padding * 2;
-  const scaleX = availableWidth / stageWidth;
-  const scaleY = availableHeight / stageHeight;
+  const scaleX = availableWidth / stageWidth.value;
+  const scaleY = availableHeight / stageHeight.value;
   zoom.value = Math.min(scaleX, scaleY, 1); // Cap at 100%
   centerViewport();
 };
@@ -515,8 +519,8 @@ const clientToStage = (event: PointerEvent | WheelEvent) => {
 };
 
 const stageToNormalized = (stage: Vec2): Vec2 => ({
-  x: (stage.x / stageWidth - 0.5) * 2,
-  y: (stage.y / stageHeight - 0.5) * 2,
+  x: (stage.x / stageWidth.value - 0.5) * 2,
+  y: (stage.y / stageHeight.value - 0.5) * 2,
 });
 
 const clientToNormalized = (event: PointerEvent | WheelEvent): Vec2 =>
@@ -979,8 +983,8 @@ const selectSurface = (surfaceId: string) => {
 };
 
 const toStage = (x: number, y: number) => ({
-  x: (x * 0.5 + 0.5) * stageWidth,
-  y: (y * 0.5 + 0.5) * stageHeight,
+  x: (x * 0.5 + 0.5) * stageWidth.value,
+  y: (y * 0.5 + 0.5) * stageHeight.value,
 });
 
 const toPoint = (x: number, y: number) => {
@@ -1020,8 +1024,8 @@ const ellipseRadiusHandles = computed(() => {
   const ellipse = activeSurface.value;
   const center = toStage(ellipse.center.x, ellipse.center.y);
   // Convert radii from normalized (-1 to 1) to stage coordinates
-  const radiusXStage = ellipse.radiusX * stageWidth * 0.5;
-  const radiusYStage = ellipse.radiusY * stageHeight * 0.5;
+  const radiusXStage = ellipse.radiusX * stageWidth.value * 0.5;
+  const radiusYStage = ellipse.radiusY * stageHeight.value * 0.5;
   return {
     center,
     radiusXHandle: { x: center.x + radiusXStage, y: center.y },
@@ -1221,13 +1225,15 @@ const duplicateSurface = async () => {
           class="scene-canvas__stage"
           :style="{
             transform: `translate(${panX}px, ${panY}px) scale(${zoom})`,
+            width: `${stageWidth}px`,
+            height: `${stageHeight}px`,
           }"
         >
           <svg
             class="scene-canvas__surfaces"
             :width="stageWidth"
             :height="stageHeight"
-            viewBox="0 0 1920 1080"
+            :viewBox="stageViewBox"
             overflow="visible"
             role="presentation"
           >
@@ -1323,7 +1329,7 @@ const duplicateSurface = async () => {
                 :x="stageWidth / 2"
                 y="40"
                 text-anchor="middle"
-              >CALIBRATION GRID • 1920×1080</text>
+              >CALIBRATION GRID • {{ stageLabel }}</text>
             </g>
 
             <polygon
@@ -1890,8 +1896,6 @@ const duplicateSurface = async () => {
 
 .scene-canvas__stage {
   position: relative;
-  width: 1920px;
-  height: 1080px;
   transform-origin: 0 0;
   background:
     linear-gradient(90deg, #1a1a1a 1px, transparent 1px) 0 0 / 48px 48px,
