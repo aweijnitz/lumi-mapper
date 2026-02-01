@@ -51,6 +51,10 @@ target_include_directories(lumi_server_lib
 )
 
 target_compile_features(lumi_server_lib PUBLIC cxx_std_17)
+target_compile_definitions(lumi_server_lib
+    PUBLIC
+        PROJECTION_MAPPER_ROOT_DIR="${CMAKE_SOURCE_DIR}"
+)
 
 if (TARGET SQLite::SQLite3)
     set(SQLITE_TARGET SQLite::SQLite3)

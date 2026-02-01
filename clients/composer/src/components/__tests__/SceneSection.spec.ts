@@ -97,10 +97,12 @@ describe("SceneSection", () => {
     });
 
     const deleteButton = wrapper.findAll("button").find((btn) => btn.text() === "Delete");
-    await deleteButton?.trigger("click");
 
+    expect(deleteButton?.attributes("disabled")).toBeDefined();
     expect(deleteSpy).not.toHaveBeenCalled();
-    expect(wrapper.text()).toContain("Cannot delete a scene referenced by a cue.");
+    expect(deleteButton?.attributes("title")).toBe(
+      "Remove cues that reference this scene before deleting.",
+    );
   });
 
   it("selects the next scene after delete", async () => {

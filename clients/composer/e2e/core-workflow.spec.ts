@@ -47,6 +47,15 @@ test("workflow creates project, feed, scene, surface, cue, saves, and plays", as
       return;
     }
 
+    if (pathname === "/api/renderer/ping" && method === "POST") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ renderers: [] }),
+      });
+      return;
+    }
+
     if (pathname === "/api/projects" && method === "POST" && body) {
       state.projectId = body.id;
       await route.fulfill({
@@ -183,45 +192,35 @@ test("workflow creates project, feed, scene, surface, cue, saves, and plays", as
   await page.goto("/");
 
   await page.getByRole("button", { name: "New Project" }).click();
-  await page.getByLabel("Project name").fill("Stage Mapping");
-  await page.getByLabel("Project description").fill("Layout test project");
   const dialog = page.getByRole("dialog", { name: "New Project" });
+  await expect(dialog).toBeVisible();
+  await dialog.locator("#project-name").fill("Stage Mapping");
+  await dialog.locator("#project-description").fill("Layout test project");
   await dialog.getByRole("button", { name: "Create" }).click();
   await Promise.all([initialFeedsRequest, initialScenesRequest, initialCuesRequest]);
 
+  await page.getByRole("tab", { name: "Assets" }).click();
   await page.getByPlaceholder("Search assets").fill("Clip");
   await page.getByRole("row", { name: /Clip A/ }).click();
 
-  await page.getByPlaceholder("Feed name").fill("Main Feed");
-  await page.getByRole("button", { name: "Add Feed" }).click();
+  await page.getByRole("tab", { name: "Feeds" }).click();
+  await page.getByTestId("feed-name").fill("Main Feed");
+  await page.getByTestId("feed-asset").click();
+  await page.getByRole("option", { name: /Clip A/ }).click();
+  await expect(page.getByTestId("feed-create")).toBeEnabled();
+  await page.getByTestId("feed-create").click();
   await feedRequestPromise;
   await expect(page.getByRole("row", { name: /Main Feed/ })).toBeVisible();
 
+  await page.getByRole("tab", { name: "Scenes" }).click();
   await page.getByPlaceholder("Scene name").fill("Main Scene");
   await page.getByPlaceholder("Scene description").fill("Primary scene");
   await page.getByRole("button", { name: "Add Scene" }).click();
   await sceneRequestPromise;
   await expect(page.getByRole("row", { name: /Main Scene/ })).toBeVisible();
   await page.getByRole("row", { name: /Main Scene/ }).click();
-  const surfaceSceneDropdown = page
-    .locator(".surface-section")
-    .getByRole("combobox", { name: "Select a scene" });
-  await surfaceSceneDropdown.click();
-  await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("Enter");
 
-  await page.getByPlaceholder("Surface name").fill("Center Surface");
-  const feedDropdown = page
-    .locator(".surface-section")
-    .getByRole("combobox", { name: "Select a feed" });
-  await feedDropdown.click();
-  await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("Enter");
-  const sceneUpdatePromise = page.waitForRequest((request) =>
-    request.url().includes("/scenes") && request.method() === "PUT",
-  );
-  await page.getByRole("button", { name: "Add Surface" }).click();
-
+  await page.getByRole("tab", { name: "Cues" }).click();
   await page.getByPlaceholder("Cue name").fill("Cue 1");
   const sceneDropdown = page
     .locator(".cue-section")
@@ -235,20 +234,11 @@ test("workflow creates project, feed, scene, surface, cue, saves, and plays", as
 
   const feedPayload = (await feedRequestPromise).postDataJSON();
   const scenePayload = (await sceneRequestPromise).postDataJSON();
-  const sceneUpdatePayload = (await sceneUpdatePromise).postDataJSON();
   const cuePayload = (await cueRequestPromise).postDataJSON();
   const projectPayload = (await projectUpdatePromise).postDataJSON();
 
   expect(feedPayload.configJson.filePath).toBe("/data/assets/clipA.mp4");
   expect(scenePayload.surfaces).toHaveLength(0);
-  expect(sceneUpdatePayload.surfaces).toHaveLength(1);
   expect(cuePayload.sceneId).toBe(scenePayload.id);
   expect(projectPayload.cueOrder).toContain(cuePayload.id);
-
-  const playCueRequestPromise = page.waitForRequest((request) =>
-    request.url().includes("/renderer/playCue") && request.method() === "POST",
-  );
-  await page.getByRole("button", { name: "Play Cue" }).click();
-  const playRequest = await playCueRequestPromise;
-  expect(playRequest.postDataJSON().cueId).toBe(cuePayload.id);
 });

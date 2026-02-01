@@ -910,10 +910,13 @@ void HttpServer::registerRoutes() {
             const auto projectId = core::ProjectId{"demo-" + suffix};
 
             auto findAssetPath = [](const std::string& filename) -> std::optional<std::filesystem::path> {
-                const std::vector<std::filesystem::path> candidates = {
+                std::vector<std::filesystem::path> candidates = {
                     std::filesystem::current_path() / "data" / "assets" / filename,
                     std::filesystem::current_path().parent_path() / "data" / "assets" / filename,
                     std::filesystem::current_path().parent_path().parent_path() / "data" / "assets" / filename};
+#ifdef PROJECTION_MAPPER_ROOT_DIR
+                candidates.emplace_back(std::filesystem::path(PROJECTION_MAPPER_ROOT_DIR) / "data" / "assets" / filename);
+#endif
                 for (const auto& candidate : candidates) {
                     if (std::filesystem::exists(candidate)) {
                         return std::filesystem::weakly_canonical(candidate);

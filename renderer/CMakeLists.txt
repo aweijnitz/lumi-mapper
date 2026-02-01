@@ -4,6 +4,32 @@ project(renderer LANGUAGES CXX)
 
 set(RENDERER_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
+if(NOT TARGET projection_core)
+    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../core ${CMAKE_CURRENT_BINARY_DIR}/core EXCLUDE_FROM_ALL)
+endif()
+
+if(NOT TARGET Catch2::Catch2WithMain)
+    add_library(Catch2 INTERFACE)
+    target_include_directories(Catch2
+        INTERFACE
+            ${CMAKE_CURRENT_LIST_DIR}/../core/third_party/catch2/include
+    )
+    target_compile_features(Catch2 INTERFACE cxx_std_17)
+
+    add_library(Catch2WithMain
+        ${CMAKE_CURRENT_LIST_DIR}/../core/third_party/catch2/src/catch_main.cpp
+    )
+    target_link_libraries(Catch2WithMain PUBLIC Catch2)
+    target_include_directories(Catch2WithMain
+        PUBLIC
+            ${CMAKE_CURRENT_LIST_DIR}/../core/third_party/catch2/include
+    )
+    target_compile_features(Catch2WithMain PUBLIC cxx_std_17)
+
+    add_library(Catch2::Catch2 ALIAS Catch2)
+    add_library(Catch2::Catch2WithMain ALIAS Catch2WithMain)
+endif()
+
 if(NOT DEFINED OPENFRAMEWORKS_DIR AND DEFINED ENV{OPENFRAMEWORKS_DIR})
     set(OPENFRAMEWORKS_DIR "$ENV{OPENFRAMEWORKS_DIR}")
 endif()
@@ -49,7 +75,7 @@ if(NOT EXISTS "${OPENFRAMEWORKS_LIB_DIR}/libopenFrameworks.a")
     message(FATAL_ERROR "Could not find libopenFrameworks.a at ${OPENFRAMEWORKS_LIB_DIR}. Check OPENFRAMEWORKS_PLATFORM/OPENFRAMEWORKS_LIB_DIR.")
 endif()
 
-set(OPENFRAMEWORKS_INCLUDE_DIRS
+set(OPENFRAMEWORKS_INCLUDE_CANDIDATES
     ${OPENFRAMEWORKS_DIR}/libs
     ${OPENFRAMEWORKS_DIR}/libs/openFrameworks
     ${OPENFRAMEWORKS_DIR}/libs/openFrameworks/3d
@@ -80,6 +106,13 @@ set(OPENFRAMEWORKS_INCLUDE_DIRS
     ${OPENFRAMEWORKS_DIR}/libs/pugixml/include
     ${OPENFRAMEWORKS_DIR}/libs/brotli/include
 )
+
+set(OPENFRAMEWORKS_INCLUDE_DIRS "")
+foreach(dir IN LISTS OPENFRAMEWORKS_INCLUDE_CANDIDATES)
+    if(EXISTS "${dir}")
+        list(APPEND OPENFRAMEWORKS_INCLUDE_DIRS "${dir}")
+    endif()
+endforeach()
 
 add_library(openframeworks STATIC IMPORTED)
 set_target_properties(openframeworks PROPERTIES
@@ -135,6 +168,71 @@ if(APPLE)
 else()
     set(OPENFRAMEWORKS_THIRDPARTY_LIBS "")
     set(OPENFRAMEWORKS_FRAMEWORK_OPTIONS "")
+
+    if(UNIX)
+        find_package(PkgConfig REQUIRED)
+        set(OPENFRAMEWORKS_PKG_CONFIG_LIBRARIES
+            cairo
+            zlib
+            gstreamer-app-1.0
+            gstreamer-1.0
+            gstreamer-video-1.0
+            gstreamer-base-1.0
+            libudev
+            freetype2
+            fontconfig
+            sndfile
+            openal
+            openssl
+            libcurl
+            libcurl4
+            glfw3
+            rtaudio
+            liburiparser
+            libpulse-simple
+            alsa
+            gl
+            glu
+            glew
+            gtk+-3.0
+            gtk+-2.0
+            libmpg123
+            gstreamer-gl-1.0
+        )
+
+        set(OPENFRAMEWORKS_PKG_LIBRARIES "")
+        set(OPENFRAMEWORKS_PKG_INCLUDE_DIRS "")
+        set(OPENFRAMEWORKS_PKG_LDFLAGS "")
+        foreach(pkg IN LISTS OPENFRAMEWORKS_PKG_CONFIG_LIBRARIES)
+            string(REGEX REPLACE "[^A-Za-z0-9]" "_" pkg_id "${pkg}")
+            pkg_check_modules(OF_${pkg_id} QUIET "${pkg}")
+            if(OF_${pkg_id}_FOUND)
+                list(APPEND OPENFRAMEWORKS_PKG_LIBRARIES ${OF_${pkg_id}_LIBRARIES})
+                list(APPEND OPENFRAMEWORKS_PKG_INCLUDE_DIRS ${OF_${pkg_id}_INCLUDE_DIRS})
+                list(APPEND OPENFRAMEWORKS_PKG_LDFLAGS ${OF_${pkg_id}_LDFLAGS_OTHER})
+            endif()
+        endforeach()
+
+        list(APPEND OPENFRAMEWORKS_THIRDPARTY_LIBS ${OPENFRAMEWORKS_PKG_LIBRARIES})
+        list(APPEND OPENFRAMEWORKS_INCLUDE_DIRS ${OPENFRAMEWORKS_PKG_INCLUDE_DIRS})
+        list(APPEND OPENFRAMEWORKS_FRAMEWORK_OPTIONS ${OPENFRAMEWORKS_PKG_LDFLAGS})
+
+        find_library(FREEIMAGE_LIBRARY NAMES freeimage FreeImage)
+        if(FREEIMAGE_LIBRARY)
+            list(APPEND OPENFRAMEWORKS_THIRDPARTY_LIBS "${FREEIMAGE_LIBRARY}")
+        endif()
+        find_library(URIPARSER_LIBRARY NAMES uriparser)
+        if(URIPARSER_LIBRARY)
+            list(APPEND OPENFRAMEWORKS_THIRDPARTY_LIBS "${URIPARSER_LIBRARY}")
+        endif()
+
+        if(EXISTS "${OPENFRAMEWORKS_DIR}/libs/tess2/lib/${OPENFRAMEWORKS_PLATFORM}/libtess2.a")
+            list(APPEND OPENFRAMEWORKS_THIRDPARTY_LIBS "${OPENFRAMEWORKS_DIR}/libs/tess2/lib/${OPENFRAMEWORKS_PLATFORM}/libtess2.a")
+        endif()
+        if(EXISTS "${OPENFRAMEWORKS_DIR}/libs/kiss/lib/${OPENFRAMEWORKS_PLATFORM}/libkiss.a")
+            list(APPEND OPENFRAMEWORKS_THIRDPARTY_LIBS "${OPENFRAMEWORKS_DIR}/libs/kiss/lib/${OPENFRAMEWORKS_PLATFORM}/libkiss.a")
+        endif()
+    endif()
 endif()
 
 set(OPENFRAMEWORKS_EXTRA_LIBS "" CACHE STRING "Extra libraries to link with openFrameworks (semicolon-separated list)")

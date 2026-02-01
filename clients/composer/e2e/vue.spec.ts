@@ -41,6 +41,15 @@ test("creates a new project from the project panel", async ({ page }) => {
       return;
     }
 
+    if (url.pathname === "/api/renderer/ping" && method === "POST") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ renderers: [] }),
+      });
+      return;
+    }
+
     if (url.pathname === "/api/projects" && method === "POST" && body) {
       await route.fulfill({
         status: 201,
@@ -60,9 +69,10 @@ test("creates a new project from the project panel", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "New Project" }).click();
 
-  await page.getByLabel("Project name").fill("Stage Mapping");
-  await page.getByLabel("Project description").fill("Layout test project");
   const dialog = page.getByRole("dialog", { name: "New Project" });
+  await expect(dialog).toBeVisible();
+  await dialog.locator("#project-name").fill("Stage Mapping");
+  await dialog.locator("#project-description").fill("Layout test project");
   await dialog.getByRole("button", { name: "Create" }).click();
 
   const request = await requestPromise;

@@ -161,7 +161,7 @@ describe("SurfacePropertiesPanel", () => {
       },
     });
 
-    const previewButton = wrapper.findAll("button").find((btn) => btn.text() === "Preview Feed");
+    const previewButton = wrapper.findAll("button").find((btn) => btn.text() === "Send to Renderer");
     await previewButton?.trigger("click");
 
     expect(loadSpy).toHaveBeenCalledWith("project-1", "scene-1");

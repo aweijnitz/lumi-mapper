@@ -57,7 +57,7 @@ describe("AssetBrowser", () => {
       },
     });
 
-    await wrapper.get('[data-testid="file-upload"]').trigger("click");
+    await wrapper.get('[data-testid="asset-upload"]').trigger("click");
 
     expect(uploadSpy).toHaveBeenCalledTimes(1);
   });

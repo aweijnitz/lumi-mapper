@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { nextTick } from "vue";
 import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import SceneCanvas from "../organisms/SceneCanvas.vue";
@@ -123,11 +124,14 @@ describe("SceneCanvas", () => {
         }) as DOMRect,
     });
 
-    await viewport.trigger("wheel", {
-      deltaY: -100,
-      clientX: 120,
-      clientY: 80,
+    const wheelEvent = new Event("wheel", { bubbles: true, cancelable: true }) as WheelEvent;
+    Object.defineProperties(wheelEvent, {
+      deltaY: { value: -100 },
+      clientX: { value: 120 },
+      clientY: { value: 80 },
     });
+    viewport.element.dispatchEvent(wheelEvent);
+    await nextTick();
 
     expect(wrapper.get('[data-testid="zoom-label"]').text()).not.toContain("25%");
   });
@@ -199,19 +203,28 @@ describe("SceneCanvas", () => {
     const handle = wrapper.find(".scene-canvas__handle");
     const original = sceneStore.activeScene.surfaces[0].vertices[0];
 
-    await handle.trigger("pointerdown", {
-      clientX: 120,
-      clientY: 80,
-      button: 0,
-      pointerId: 1,
+    const pointerDown = new Event("pointerdown", { bubbles: true, cancelable: true }) as PointerEvent;
+    Object.defineProperties(pointerDown, {
+      clientX: { value: 120 },
+      clientY: { value: 80 },
+      button: { value: 0 },
+      pointerId: { value: 1 },
     });
-    await viewport.trigger("pointermove", {
-      clientX: 140,
-      clientY: 100,
-      button: 0,
-      pointerId: 1,
+    handle.element.dispatchEvent(pointerDown);
+
+    const pointerMove = new Event("pointermove", { bubbles: true, cancelable: true }) as PointerEvent;
+    Object.defineProperties(pointerMove, {
+      clientX: { value: 140 },
+      clientY: { value: 100 },
+      button: { value: 0 },
+      pointerId: { value: 1 },
     });
-    await viewport.trigger("pointerup", { pointerId: 1 });
+    window.dispatchEvent(pointerMove);
+
+    const pointerUp = new Event("pointerup", { bubbles: true, cancelable: true }) as PointerEvent;
+    Object.defineProperties(pointerUp, { pointerId: { value: 1 } });
+    window.dispatchEvent(pointerUp);
+    await nextTick();
 
     const updated = sceneStore.activeScene.surfaces[0].vertices[0];
     expect(updated.x).not.toBe(original.x);

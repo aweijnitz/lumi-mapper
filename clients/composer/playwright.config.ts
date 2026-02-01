@@ -103,9 +103,12 @@ export default defineConfig({
      * Use the preview server on CI for more realistic testing.
      * Playwright will re-use the local server if there is already a dev-server running.
      */
-    command: process.env.CI
-      ? 'VITE_API_BASE=http://127.0.0.1:65535 npm run preview -- --host 127.0.0.1 --port 4173'
-      : 'VITE_API_BASE=http://127.0.0.1:65535 npm run dev -- --host 127.0.0.1 --port 5173',
+    command: (() => {
+      const viteBin = 'node ./node_modules/vite/bin/vite.js'
+      return process.env.CI
+        ? `VITE_API_BASE=http://127.0.0.1:65535 ${viteBin} preview --host 127.0.0.1 --port 4173`
+        : `VITE_API_BASE=http://127.0.0.1:65535 ${viteBin} --host 127.0.0.1 --port 5173`
+    })(),
     port: process.env.CI ? 4173 : 5173,
     reuseExistingServer: !process.env.CI,
   },
