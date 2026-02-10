@@ -33,6 +33,8 @@ add_library(lumi_server_lib
     ${SERVER_SOURCE_DIR}/renderer/RendererRegistry.h
     ${SERVER_SOURCE_DIR}/repo/FeedRepository.cpp
     ${SERVER_SOURCE_DIR}/repo/FeedRepository.h
+    ${SERVER_SOURCE_DIR}/repo/AssetRepository.cpp
+    ${SERVER_SOURCE_DIR}/repo/AssetRepository.h
     ${SERVER_SOURCE_DIR}/repo/SurfaceRepository.cpp
     ${SERVER_SOURCE_DIR}/repo/SurfaceRepository.h
     ${SERVER_SOURCE_DIR}/repo/SceneRepository.cpp
@@ -98,7 +100,6 @@ add_executable(lumi_server_tests
     tests/HttpApi_test.cpp
     tests/HttpScenesSurfaces_test.cpp
     tests/HttpRendererIntegration_test.cpp
-    tests/DemoFlow_test.cpp
     tests/RendererRegistry_test.cpp
 )
 

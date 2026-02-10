@@ -24,9 +24,8 @@ public:
     bool projectExists(const core::ProjectId& projectId);
 
 private:
-    void persistCueOrder(const core::ProjectId& projectId, const std::vector<core::CueId>& cueOrder, sqlite3* handle);
-
     db::SqliteConnection& connection_;
 };
 
 }  // namespace projection::server::repo
+

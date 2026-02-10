@@ -5,6 +5,7 @@
 
 #include <ofMain.h>
 
+#include <projection/core/Asset.h>
 #include <projection/core/Feed.h>
 #include <projection/core/Scene.h>
 
@@ -29,18 +30,21 @@ struct ImageFeedResource {
 
 // Extracts the configured file paths for video feeds.
 std::unordered_map<std::string, std::string> mapVideoFeedFilePaths(
-    const projection::core::Scene& scene, const std::vector<projection::core::Feed>& feeds);
+    const projection::core::Scene& scene, const std::vector<projection::core::Feed>& feeds,
+    const std::vector<projection::core::Asset>& assets);
 
 class RenderState {
  public:
   RenderState() = default;
 
   void loadSceneDefinition(const projection::core::Scene& scene,
-                           const std::vector<projection::core::Feed>& feeds);
+                           const std::vector<projection::core::Feed>& feeds,
+                           const std::vector<projection::core::Asset>& assets);
   void updateVideoPlayers();
 
   const projection::core::Scene& currentScene() const { return currentScene_; }
   const std::vector<projection::core::Feed>& currentFeeds() const { return currentFeeds_; }
+  const std::vector<projection::core::Asset>& currentAssets() const { return currentAssets_; }
   const std::unordered_map<std::string, VideoFeedResource>& videoFeeds() const { return videoFeeds_; }
   const std::unordered_map<std::string, ImageFeedResource>& imageFeeds() const { return imageFeeds_; }
   std::unordered_map<std::string, ImageFeedResource>& imageFeeds() { return imageFeeds_; }
@@ -48,6 +52,7 @@ class RenderState {
  private:
   projection::core::Scene currentScene_{};
   std::vector<projection::core::Feed> currentFeeds_{};
+  std::vector<projection::core::Asset> currentAssets_{};
   std::unordered_map<std::string, VideoFeedResource> videoFeeds_{};
   std::unordered_map<std::string, ImageFeedResource> imageFeeds_{};
 };

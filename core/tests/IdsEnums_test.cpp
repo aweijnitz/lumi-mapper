@@ -20,6 +20,9 @@ TEST_CASE("Identifier wrappers compare by value", "[ids]") {
   FeedId feedTwo{"feed-2"};
   REQUIRE(feedOne != feedTwo);
 
+  AssetId asset = makeAssetId("asset-1");
+  REQUIRE(asset == AssetId{"asset-1"});
+
   CueId cue = makeCueId("cue-1");
   REQUIRE(cue.value == std::string("cue-1"));
 
@@ -27,18 +30,15 @@ TEST_CASE("Identifier wrappers compare by value", "[ids]") {
   REQUIRE(project == ProjectId{"proj-1"});
 }
 
-TEST_CASE("FeedType string conversion succeeds for known values", "[enums]") {
-  REQUIRE(toString(FeedType::VideoFile) == "VideoFile");
-  REQUIRE(toString(FeedType::Camera) == "Camera");
-  REQUIRE(toString(FeedType::Generated) == "Generated");
+TEST_CASE("AssetType string conversion succeeds for known values", "[enums]") {
+  REQUIRE(toString(AssetType::VideoFile) == "VideoFile");
+  REQUIRE(toString(AssetType::ImageFile) == "ImageFile");
 
-  FeedType type{};
+  AssetType type{};
   REQUIRE(fromString("VideoFile", type));
-  REQUIRE(type == FeedType::VideoFile);
-  REQUIRE(fromString("Camera", type));
-  REQUIRE(type == FeedType::Camera);
-  REQUIRE(fromString("Generated", type));
-  REQUIRE(type == FeedType::Generated);
+  REQUIRE(type == AssetType::VideoFile);
+  REQUIRE(fromString("ImageFile", type));
+  REQUIRE(type == AssetType::ImageFile);
 }
 
 TEST_CASE("BlendMode string conversion succeeds for known values", "[enums]") {
@@ -56,12 +56,12 @@ TEST_CASE("BlendMode string conversion succeeds for known values", "[enums]") {
 }
 
 TEST_CASE("Enum parsing fails gracefully for invalid strings", "[enums]") {
-  FeedType feedType = FeedType::VideoFile;
+  AssetType assetType = AssetType::VideoFile;
   BlendMode blendMode = BlendMode::Normal;
 
-  REQUIRE(!fromString("", feedType));
-  REQUIRE(!fromString("unknown", feedType));
-  REQUIRE(feedType == FeedType::VideoFile);
+  REQUIRE(!fromString("", assetType));
+  REQUIRE(!fromString("unknown", assetType));
+  REQUIRE(assetType == AssetType::VideoFile);
 
   REQUIRE(!fromString("Invalid", blendMode));
   REQUIRE(!fromString("123", blendMode));

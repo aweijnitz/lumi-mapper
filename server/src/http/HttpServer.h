@@ -4,6 +4,7 @@
 #include <memory>
 
 #include "repo/FeedRepository.h"
+#include "repo/AssetRepository.h"
 #include "repo/SceneRepository.h"
 #include "repo/CueRepository.h"
 #include "repo/ProjectRepository.h"
@@ -13,8 +14,9 @@ namespace projection::server::http {
 
 class HttpServer {
 public:
-    HttpServer(repo::FeedRepository& feedRepository, repo::SceneRepository& sceneRepository,
-               repo::CueRepository& cueRepository, repo::ProjectRepository& projectRepository,
+    HttpServer(repo::AssetRepository& assetRepository, repo::FeedRepository& feedRepository,
+               repo::SceneRepository& sceneRepository, repo::CueRepository& cueRepository,
+               repo::ProjectRepository& projectRepository,
                std::shared_ptr<renderer::RendererRegistry> rendererRegistry = nullptr, bool verbose = false,
                std::string webRoot = "");
 
@@ -32,10 +34,13 @@ private:
     void registerStaticRoutes();
     void respondWithError(::httplib::Response& res, int status, const std::string& message);
     bool collectFeedsForScene(const core::Scene& scene, std::vector<core::Feed>& feeds, std::string& error);
+    bool collectAssetsForFeeds(const std::vector<core::Feed>& feeds, std::vector<core::Asset>& assets,
+                               std::string& error);
 
     std::string generateCommandId() const;
 
     repo::FeedRepository& feedRepository_;
+    repo::AssetRepository& assetRepository_;
     repo::SceneRepository& sceneRepository_;
     repo::CueRepository& cueRepository_;
     repo::ProjectRepository& projectRepository_;

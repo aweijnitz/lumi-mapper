@@ -4,44 +4,32 @@
 
 namespace projection::core {
 
-enum class FeedType { VideoFile, ImageFile, Camera, Generated };
+enum class AssetType { VideoFile, ImageFile };
 
 // Pan direction for image feeds
 enum class PanDirection { LeftToRight, RightToLeft, PingPong };
 
 enum class BlendMode { Normal, Additive, Multiply };
 
-// Convert FeedType to a readable string representation.
-inline std::string toString(FeedType type) {
+// Convert AssetType to a readable string representation.
+inline std::string toString(AssetType type) {
   switch (type) {
-    case FeedType::VideoFile:
+    case AssetType::VideoFile:
       return "VideoFile";
-    case FeedType::ImageFile:
+    case AssetType::ImageFile:
       return "ImageFile";
-    case FeedType::Camera:
-      return "Camera";
-    case FeedType::Generated:
-      return "Generated";
   }
   return "Unknown";
 }
 
-// Parse a FeedType from a string. Returns true on success.
-inline bool fromString(const std::string& value, FeedType& outType) {
+// Parse an AssetType from a string. Returns true on success.
+inline bool fromString(const std::string& value, AssetType& outType) {
   if (value == "VideoFile") {
-    outType = FeedType::VideoFile;
+    outType = AssetType::VideoFile;
     return true;
   }
   if (value == "ImageFile") {
-    outType = FeedType::ImageFile;
-    return true;
-  }
-  if (value == "Camera") {
-    outType = FeedType::Camera;
-    return true;
-  }
-  if (value == "Generated") {
-    outType = FeedType::Generated;
+    outType = AssetType::ImageFile;
     return true;
   }
   return false;

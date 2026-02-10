@@ -31,11 +31,12 @@ onMounted(() => {
 });
 
 const handleUpload = async (event: FileUploadUploaderEvent) => {
-  if (!event.files || !event.files.length) {
+  const files = Array.isArray(event.files) ? event.files : event.files ? [event.files] : [];
+  if (!files.length) {
     return;
   }
 
-  for (const file of event.files) {
+  for (const file of files) {
     await assetStore.uploadAsset(file);
   }
 };
@@ -98,7 +99,7 @@ const deleteSelected = async () => {
         <template #body="{ data }">
           <span class="asset-browser__name">
             <i
-              :class="data.type === 'image' ? 'pi pi-image' : 'pi pi-video'"
+              :class="data.type === 'ImageFile' ? 'pi pi-image' : 'pi pi-video'"
               class="asset-browser__icon"
             />
             {{ data.name }}
@@ -108,7 +109,7 @@ const deleteSelected = async () => {
       <Column field="type" header="Type">
         <template #body="{ data }">
           <span :class="['asset-browser__type', `asset-browser__type--${data.type}`]">
-            {{ data.type === 'image' ? 'Image' : data.type === 'video' ? 'Video' : 'Unknown' }}
+            {{ data.type === 'ImageFile' ? 'Image' : data.type === 'VideoFile' ? 'Video' : 'Unknown' }}
           </span>
         </template>
       </Column>

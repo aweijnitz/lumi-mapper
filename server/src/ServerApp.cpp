@@ -3,10 +3,12 @@
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
+#include <thread>
 
 #include "db/SchemaMigrations.h"
 #include "db/SqliteConnection.h"
 #include "http/HttpServer.h"
+#include "repo/AssetRepository.h"
 #include "repo/FeedRepository.h"
 #include "repo/ProjectRepository.h"
 #include "repo/SceneRepository.h"
@@ -37,6 +39,7 @@ int ServerApp::run() {
         log("Applying schema migrations");
         db::SchemaMigrations::applyMigrations(*connection_);
 
+        assetRepository_ = std::make_unique<repo::AssetRepository>(*connection_);
         feedRepository_ = std::make_unique<repo::FeedRepository>(*connection_);
         sceneRepository_ = std::make_unique<repo::SceneRepository>(*connection_);
         cueRepository_ = std::make_unique<repo::CueRepository>(*connection_);
@@ -46,15 +49,53 @@ int ServerApp::run() {
         log("Listening for renderers on port " + std::to_string(config_.rendererPort));
         rendererRegistry_->start(config_.rendererPort);
 
-        httpServer_ = std::make_unique<http::HttpServer>(*feedRepository_, *sceneRepository_, *cueRepository_,
-                                                         *projectRepository_, rendererRegistry_, config_.verbose,
-                                                         config_.webRoot);
+        httpServer_ = std::make_unique<http::HttpServer>(*assetRepository_, *feedRepository_, *sceneRepository_,
+                                                         *cueRepository_, *projectRepository_, rendererRegistry_,
+                                                         config_.verbose, config_.webRoot);
         std::cout << "Database initialized at '" << dbPath.string() << "'" << std::endl;
         std::cout << "HTTP server listening on port " << config_.httpPort << std::endl;
         if (!config_.webRoot.empty()) {
             std::cout << "Serving web root from '" << config_.webRoot << "'" << std::endl;
         }
-        httpServer_->start(config_.httpPort);
+
+        stopRequested_.store(false);
+        std::exception_ptr httpError;
+        std::atomic<bool> httpExited{false};
+        std::thread httpThread([&] {
+            try {
+                httpServer_->start(config_.httpPort);
+            } catch (...) {
+                httpError = std::current_exception();
+            }
+            httpExited.store(true);
+            stopCv_.notify_all();
+        });
+
+        while (!httpExited.load() && httpServer_ && !httpServer_->isRunning()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+
+        {
+            std::unique_lock<std::mutex> lock(stopMutex_);
+            stopCv_.wait(lock, [&] { return stopRequested_.load() || httpExited.load(); });
+        }
+
+        if (httpExited.load()) {
+            if (httpThread.joinable()) {
+                httpThread.join();
+            }
+            if (httpError) {
+                std::rethrow_exception(httpError);
+            }
+            return 1;
+        }
+
+        if (httpServer_) {
+            httpServer_->stop();
+        }
+        if (httpThread.joinable()) {
+            httpThread.join();
+        }
     } catch (const std::exception& ex) {
         std::cerr << "Failed to start server: " << ex.what() << std::endl;
         return 1;
@@ -65,11 +106,13 @@ int ServerApp::run() {
 }
 
 void ServerApp::stop() {
+    {
+        std::lock_guard<std::mutex> lock(stopMutex_);
+        stopRequested_.store(true);
+    }
+    stopCv_.notify_all();
     if (rendererRegistry_) {
         rendererRegistry_->stop();
-    }
-    if (httpServer_) {
-        httpServer_->stop();
     }
 }
 

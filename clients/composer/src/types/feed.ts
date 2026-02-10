@@ -1,20 +1,17 @@
-export type FeedType = "VideoFile" | "ImageFile";
-
-export type VideoFileConfig = {
-  filePath: string;
-};
-
 export type PanDirection = "leftToRight" | "rightToLeft" | "pingPong";
 
-export type ImageFileConfig = {
-  filePath: string;
-  panDirection?: PanDirection;       // Default: "leftToRight"
-  panDurationSeconds?: number;        // Default: 120 (2 minutes)
-  visiblePortion?: number;            // Default: 0.6 (60% of image width visible)
+export type FeedSettings = {
+  variantPath?: string;
+  monochrome?: boolean;
+  panDirection?: PanDirection;
+  panDurationSeconds?: number;
+  visiblePortion?: number;
 };
 
-export const defaultImagePanSettings = {
-  panDirection: "leftToRight" as PanDirection,
+export const defaultFeedSettings: Required<FeedSettings> = {
+  variantPath: "",
+  monochrome: false,
+  panDirection: "leftToRight",
   panDurationSeconds: 120,
   visiblePortion: 0.6,
 };
@@ -29,6 +26,7 @@ export type Feed = {
   projectId: string;
   id: string;
   name: string;
-  type: FeedType;
-  configJson: VideoFileConfig | ImageFileConfig | Record<string, unknown> | string;
+  assetId: string;
+  settings?: FeedSettings;
 };
+

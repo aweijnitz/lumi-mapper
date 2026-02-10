@@ -35,6 +35,16 @@ struct FeedId {
   bool operator<(const FeedId& other) const { return value < other.value; }
 };
 
+struct AssetId {
+  std::string value;
+
+  explicit AssetId(std::string v = "") : value(std::move(v)) {}
+
+  bool operator==(const AssetId& other) const { return value == other.value; }
+  bool operator!=(const AssetId& other) const { return !(*this == other); }
+  bool operator<(const AssetId& other) const { return value < other.value; }
+};
+
 struct CueId {
   std::string value;
 
@@ -58,6 +68,7 @@ struct ProjectId {
 inline SceneId makeSceneId(const std::string& raw) { return SceneId(raw); }
 inline SurfaceId makeSurfaceId(const std::string& raw) { return SurfaceId(raw); }
 inline FeedId makeFeedId(const std::string& raw) { return FeedId(raw); }
+inline AssetId makeAssetId(const std::string& raw) { return AssetId(raw); }
 inline CueId makeCueId(const std::string& raw) { return CueId(raw); }
 inline ProjectId makeProjectId(const std::string& raw) { return ProjectId(raw); }
 

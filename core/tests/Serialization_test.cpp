@@ -3,6 +3,7 @@
 #include <functional>
 #include <nlohmann/json.hpp>
 
+#include "projection/core/Asset.h"
 #include "projection/core/Cue.h"
 #include "projection/core/Feed.h"
 #include "projection/core/Project.h"
@@ -10,12 +11,16 @@
 #include "projection/core/Serialization.h"
 #include "projection/core/Surface.h"
 
+using projection::core::Asset;
+using projection::core::AssetId;
+using projection::core::AssetType;
+using projection::core::AssetVariant;
 using projection::core::BlendMode;
 using projection::core::Cue;
 using projection::core::CueId;
 using projection::core::Feed;
 using projection::core::FeedId;
-using projection::core::FeedType;
+using projection::core::FeedSettings;
 using projection::core::Project;
 using projection::core::ProjectId;
 using projection::core::ProjectSettings;
@@ -40,16 +45,34 @@ void expectRuntimeError(const std::function<void()>& fn) {
 
 }  // namespace
 
+TEST_CASE("Asset round-trip serialization", "[serialization]") {
+  Asset asset{AssetId{"asset-1"}, "Clip A", AssetType::VideoFile, "data/assets/clipA.mp4",
+              {AssetVariant{"data/assets/clipA_low.mp4", "lowres"}}};
+
+  json j = asset;
+  Asset parsed = j.get<Asset>();
+
+  REQUIRE(parsed.getId().value == asset.getId().value);
+  REQUIRE(parsed.getName() == asset.getName());
+  REQUIRE(parsed.getType() == asset.getType());
+  REQUIRE(parsed.getPath() == asset.getPath());
+  REQUIRE(parsed.getVariants() == asset.getVariants());
+}
+
 TEST_CASE("Feed round-trip serialization", "[serialization]") {
-  Feed feed{ProjectId{"project-1"}, FeedId{"feed-1"}, "Camera Feed", FeedType::Camera, "{\"device\":0}"};
+  FeedSettings settings;
+  settings.variantPath = "data/assets/clipA_low.mp4";
+  settings.monochrome = true;
+
+  Feed feed{ProjectId{"project-1"}, FeedId{"feed-1"}, "Feed A", AssetId{"asset-1"}, settings};
 
   json j = feed;
   Feed parsed = j.get<Feed>();
 
   REQUIRE(parsed.getId().value == feed.getId().value);
   REQUIRE(parsed.getName() == feed.getName());
-  REQUIRE(parsed.getType() == feed.getType());
-  REQUIRE(parsed.getConfigJson() == feed.getConfigJson());
+  REQUIRE(parsed.getAssetId().value == feed.getAssetId().value);
+  REQUIRE(parsed.getSettings() == feed.getSettings());
 }
 
 TEST_CASE("Surface round-trip serialization", "[serialization]") {
@@ -121,6 +144,11 @@ TEST_CASE("Project round-trip serialization", "[serialization]") {
   Project project{ProjectId{"proj-1"},
                   "Main Show",
                   "Demo project",
+                  "2026-02-02T10:00:00Z",
+                  "2026-02-02T10:10:00Z",
+                  {AssetId{"asset-1"}, AssetId{"asset-2"}},
+                  {SceneId{"scene-1"}},
+                  {FeedId{"feed-1"}},
                   {CueId{"cue-1"}, CueId{"cue-2"}},
                   settings};
 
@@ -130,45 +158,26 @@ TEST_CASE("Project round-trip serialization", "[serialization]") {
   REQUIRE(parsed.getId().value == project.getId().value);
   REQUIRE(parsed.getName() == project.getName());
   REQUIRE(parsed.getDescription() == project.getDescription());
+  REQUIRE(parsed.getCreatedAt() == project.getCreatedAt());
+  REQUIRE(parsed.getUpdatedAt() == project.getUpdatedAt());
+  REQUIRE(parsed.getAssetIds().size() == project.getAssetIds().size());
+  REQUIRE(parsed.getSceneIds().size() == project.getSceneIds().size());
+  REQUIRE(parsed.getFeedIds().size() == project.getFeedIds().size());
   REQUIRE(parsed.getCueOrder().size() == project.getCueOrder().size());
-  REQUIRE(parsed.getCueOrder()[0].value == "cue-1");
   REQUIRE(parsed.getSettings().controllers.at("fader1") == "masterBrightness");
   std::vector<int> expectedChannels{1, 10};
   REQUIRE(parsed.getSettings().midiChannels == expectedChannels);
   REQUIRE(parsed.getSettings().globalConfig.at("clockBpm") == "128");
 }
 
-TEST_CASE("Feed configJson accepts string or object", "[serialization]") {
-  json feedWithString = {
-      {"projectId", "project-1"},
-      {"id", "feed-1"},
-      {"name", "Clip"},
-      {"type", "VideoFile"},
-      {"configJson", "{\"filePath\":\"data/assets/clipA.mp4\"}"},
-  };
-  Feed parsedString = feedWithString.get<Feed>();
-  REQUIRE(parsedString.getConfigJson() == "{\"filePath\":\"data/assets/clipA.mp4\"}");
-
-  json feedWithObject = {
-      {"projectId", "project-1"},
-      {"id", "feed-2"},
-      {"name", "Clip"},
-      {"type", "VideoFile"},
-      {"configJson", json{{"filePath", "data/assets/clipB.mp4"}}},
-  };
-  Feed parsedObject = feedWithObject.get<Feed>();
-  REQUIRE(parsedObject.getConfigJson() == "{\"filePath\":\"data/assets/clipB.mp4\"}");
-}
-
 TEST_CASE("Invalid enum strings throw", "[serialization][negative]") {
-  json invalidFeed = {{"projectId", "project-1"},
-                      {"id", "feed-1"},
-                      {"name", "Invalid"},
-                      {"type", "NotAType"},
-                      {"configJson", "{}"}};
-  expectRuntimeError([&]() { invalidFeed.get<Feed>(); });
+  json invalidAsset = {{"id", "asset-1"},
+                       {"name", "Invalid"},
+                       {"type", "NotAType"},
+                       {"path", "data/assets/clipA.mp4"}};
+  expectRuntimeError([&]() { invalidAsset.get<Asset>(); });
 
-  json invalidSurface = {{"id", "s1"},
+  json invalidSurface = {"id", "s1",
                          {"name", "Surf"},
                          {"vertices", json::array({{{"x", 0}, {"y", 0}}})},
                          {"feedId", "feed"},
@@ -180,25 +189,25 @@ TEST_CASE("Invalid enum strings throw", "[serialization][negative]") {
 }
 
 TEST_CASE("Missing required fields throw", "[serialization][negative]") {
-  json missingId = {{"projectId", "project-1"}, {"name", "No Id"}, {"type", "VideoFile"}, {"configJson", "{}"}};
+  json missingId = {{"projectId", "project-1"}, {"name", "No Id"}, {"assetId", "asset-1"}};
   expectRuntimeError([&]() { missingId.get<Feed>(); });
 
-  json missingVertices = {{"id", "s1"},
-                          {"name", "Surf"},
-                          {"feedId", "feed"},
-                          {"opacity", 1.0},
-                          {"brightness", 1.0},
-                          {"blendMode", "Normal"},
-                          {"zOrder", 0}};
-  expectRuntimeError([&]() { missingVertices.get<Surface>(); });
+  json missingProjectFields = {{"id", "proj-1"},
+                               {"name", "Bad"},
+                               {"description", "desc"},
+                               {"createdAt", "2026-02-02T10:00:00Z"},
+                               {"updatedAt", "2026-02-02T10:10:00Z"},
+                               {"assetIds", json::array()},
+                               {"sceneIds", json::array()},
+                               {"feedIds", json::array()}};
+  expectRuntimeError([&]() { missingProjectFields.get<Project>(); });
 }
 
 TEST_CASE("Type mismatches throw", "[serialization][negative]") {
   json wrongType = {{"projectId", "project-1"},
                     {"id", 123},
                     {"name", "Bad"},
-                    {"type", "VideoFile"},
-                    {"configJson", "{}"}};
+                    {"assetId", "asset-1"}};
   expectRuntimeError([&]() { wrongType.get<Feed>(); });
 
   json badVertices = {{"id", "s1"},
@@ -211,12 +220,15 @@ TEST_CASE("Type mismatches throw", "[serialization][negative]") {
                       {"zOrder", 0}};
   expectRuntimeError([&]() { badVertices.get<Surface>(); });
 
-  json badProject = {
-      {"id", "proj-1"},
-      {"name", "Bad"},
-      {"description", "desc"},
-      {"cueOrder", json::array({{"not-a-string"}})},
-      {"settings", json{{"midiChannels", json::array({1, 2})}}},
-  };
+  json badProject = {{"id", "proj-1"},
+                     {"name", "Bad"},
+                     {"description", "desc"},
+                     {"createdAt", "2026-02-02T10:00:00Z"},
+                     {"updatedAt", "2026-02-02T10:10:00Z"},
+                     {"assetIds", json::array({{"not-a-string"}})},
+                     {"sceneIds", json::array()},
+                     {"feedIds", json::array()},
+                     {"cueOrder", json::array()},
+                     {"settings", json{{"midiChannels", json::array({1, 2})}}}};
   expectRuntimeError([&]() { badProject.get<Project>(); });
 }

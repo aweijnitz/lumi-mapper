@@ -5,10 +5,13 @@
 #include <chrono>
 #include <stdexcept>
 #include <sstream>
+#include <iomanip>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <vector>
 #include <cstdint>
+#include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
 #include <optional>
@@ -17,6 +20,7 @@
 #include "projection/core/RendererProtocol.h"
 #include "projection/core/Validation.h"
 #include "projection/core/Project.h"
+#include "projection/core/Asset.h"
 
 namespace projection::server::http {
 
@@ -49,18 +53,18 @@ std::optional<std::filesystem::path> findAssetsRoot() {
     return std::nullopt;
 }
 
-std::string assetTypeForPath(const std::filesystem::path& path) {
+std::optional<core::AssetType> assetTypeForPath(const std::filesystem::path& path) {
     std::string ext = path.extension().string();
     // Convert to lowercase for case-insensitive comparison
     std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return std::tolower(c); });
     if (ext == ".mp4" || ext == ".mov" || ext == ".avi" || ext == ".mkv" || ext == ".webm" || ext == ".m4v") {
-        return "video";
+        return core::AssetType::VideoFile;
     }
     if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".gif" || ext == ".webp" || ext == ".bmp" ||
         ext == ".tiff" || ext == ".tif") {
-        return "image";
+        return core::AssetType::ImageFile;
     }
-    return "unknown";
+    return std::nullopt;
 }
 
 std::optional<std::string> sanitizeAssetName(const std::string& raw) {
@@ -71,13 +75,30 @@ std::optional<std::string> sanitizeAssetName(const std::string& raw) {
     }
     return name;
 }
+
+std::string nowIso8601Utc() {
+    using std::chrono::system_clock;
+    auto now = system_clock::now();
+    std::time_t nowTime = system_clock::to_time_t(now);
+    std::tm utc{};
+#if defined(_WIN32)
+    gmtime_s(&utc, &nowTime);
+#else
+    gmtime_r(&nowTime, &utc);
+#endif
+    std::ostringstream out;
+    out << std::put_time(&utc, "%Y-%m-%dT%H:%M:%SZ");
+    return out.str();
+}
 }  // namespace
 
-HttpServer::HttpServer(repo::FeedRepository& feedRepository, repo::SceneRepository& sceneRepository,
-                       repo::CueRepository& cueRepository, repo::ProjectRepository& projectRepository,
+HttpServer::HttpServer(repo::AssetRepository& assetRepository, repo::FeedRepository& feedRepository,
+                       repo::SceneRepository& sceneRepository, repo::CueRepository& cueRepository,
+                       repo::ProjectRepository& projectRepository,
                        std::shared_ptr<renderer::RendererRegistry> rendererRegistry, bool verbose,
                        std::string webRoot)
     : feedRepository_(feedRepository),
+      assetRepository_(assetRepository),
       sceneRepository_(sceneRepository),
       cueRepository_(cueRepository),
       projectRepository_(projectRepository),
@@ -123,7 +144,106 @@ void HttpServer::registerRoutes() {
         server_->Delete("/api" + path, handler);
     };
 
-    registerPost(R"(/projects/([^/]+)/feeds)", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+    auto updateProjectAssetList = [this](const core::ProjectId& projectId, const core::AssetId& assetId,
+                                         bool add, ::httplib::Response& res) -> bool {
+        auto projectOpt = projectRepository_.findProjectById(projectId);
+        if (!projectOpt.has_value()) {
+            respondWithError(res, 404, "Project not found");
+            return false;
+        }
+        auto project = *projectOpt;
+        auto& assetIds = project.getAssetIds();
+        if (add) {
+            auto it = std::find_if(assetIds.begin(), assetIds.end(),
+                                   [&](const core::AssetId& id) { return id == assetId; });
+            if (it == assetIds.end()) {
+                assetIds.push_back(assetId);
+            }
+        } else {
+            assetIds.erase(std::remove_if(assetIds.begin(), assetIds.end(),
+                                          [&](const core::AssetId& id) { return id == assetId; }),
+                           assetIds.end());
+        }
+        project.setUpdatedAt(nowIso8601Utc());
+        projectRepository_.updateProject(project);
+        return true;
+    };
+    auto updateProjectFeedList = [this](const core::ProjectId& projectId, const core::FeedId& feedId,
+                                        bool add, ::httplib::Response& res) -> bool {
+        auto projectOpt = projectRepository_.findProjectById(projectId);
+        if (!projectOpt.has_value()) {
+            respondWithError(res, 404, "Project not found");
+            return false;
+        }
+        auto project = *projectOpt;
+        auto& feedIds = project.getFeedIds();
+        if (add) {
+            auto it = std::find_if(feedIds.begin(), feedIds.end(),
+                                   [&](const core::FeedId& id) { return id == feedId; });
+            if (it == feedIds.end()) {
+                feedIds.push_back(feedId);
+            }
+        } else {
+            feedIds.erase(std::remove_if(feedIds.begin(), feedIds.end(),
+                                         [&](const core::FeedId& id) { return id == feedId; }),
+                          feedIds.end());
+        }
+        project.setUpdatedAt(nowIso8601Utc());
+        projectRepository_.updateProject(project);
+        return true;
+    };
+    auto updateProjectSceneList = [this](const core::ProjectId& projectId, const core::SceneId& sceneId,
+                                         bool add, ::httplib::Response& res) -> bool {
+        auto projectOpt = projectRepository_.findProjectById(projectId);
+        if (!projectOpt.has_value()) {
+            respondWithError(res, 404, "Project not found");
+            return false;
+        }
+        auto project = *projectOpt;
+        auto& sceneIds = project.getSceneIds();
+        if (add) {
+            auto it = std::find_if(sceneIds.begin(), sceneIds.end(),
+                                   [&](const core::SceneId& id) { return id == sceneId; });
+            if (it == sceneIds.end()) {
+                sceneIds.push_back(sceneId);
+            }
+        } else {
+            sceneIds.erase(std::remove_if(sceneIds.begin(), sceneIds.end(),
+                                          [&](const core::SceneId& id) { return id == sceneId; }),
+                           sceneIds.end());
+        }
+        project.setUpdatedAt(nowIso8601Utc());
+        projectRepository_.updateProject(project);
+        return true;
+    };
+    auto updateProjectCueOrder = [this](const core::ProjectId& projectId, const core::CueId& cueId,
+                                        bool add, ::httplib::Response& res) -> bool {
+        auto projectOpt = projectRepository_.findProjectById(projectId);
+        if (!projectOpt.has_value()) {
+            respondWithError(res, 404, "Project not found");
+            return false;
+        }
+        auto project = *projectOpt;
+        auto& cueOrder = project.getCueOrder();
+        if (add) {
+            auto it = std::find_if(cueOrder.begin(), cueOrder.end(),
+                                   [&](const core::CueId& id) { return id == cueId; });
+            if (it == cueOrder.end()) {
+                cueOrder.push_back(cueId);
+            }
+        } else {
+            cueOrder.erase(std::remove_if(cueOrder.begin(), cueOrder.end(),
+                                          [&](const core::CueId& id) { return id == cueId; }),
+                           cueOrder.end());
+        }
+        project.setUpdatedAt(nowIso8601Utc());
+        projectRepository_.updateProject(project);
+        return true;
+    };
+
+    registerPost(R"(/projects/([^/]+)/feeds)",
+                 [this, updateProjectAssetList, updateProjectFeedList](const ::httplib::Request& req,
+                                                                       ::httplib::Response& res) {
         try {
             if (req.matches.size() < 2) {
                 respondWithError(res, 400, "Missing project id");
@@ -136,7 +256,27 @@ void HttpServer::registerRoutes() {
                 respondWithError(res, 400, "Feed projectId does not match path project id");
                 return;
             }
+            auto asset = assetRepository_.findAssetById(feed.getAssetId());
+            if (!asset.has_value()) {
+                respondWithError(res, 400, "Feed asset does not exist");
+                return;
+            }
+            auto projectOpt = projectRepository_.findProjectById(projectId);
+            if (!projectOpt.has_value()) {
+                respondWithError(res, 404, "Project not found");
+                return;
+            }
+            const auto& assetIds = projectOpt->getAssetIds();
+            auto assetIt = std::find_if(assetIds.begin(), assetIds.end(),
+                                        [&](const core::AssetId& id) { return id == feed.getAssetId(); });
+            if (assetIt == assetIds.end()) {
+                assetRepository_.addAssetToProject(projectId, feed.getAssetId());
+                if (!updateProjectAssetList(projectId, feed.getAssetId(), true, res)) {
+                    return;
+                }
+            }
             auto created = feedRepository_.createFeed(feed);
+            updateProjectFeedList(projectId, created.getId(), true, res);
             if (verbose_) {
                 std::cerr << "[http] Created feed project=" << created.getProjectId().value
                           << " id=" << created.getId().value << " name=" << created.getName()
@@ -149,7 +289,8 @@ void HttpServer::registerRoutes() {
         }
     });
 
-    registerPut(R"(/projects/([^/]+)/feeds/(.+))", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+    registerPut(R"(/projects/([^/]+)/feeds/(.+))",
+                [this, updateProjectAssetList](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
             if (req.matches.size() < 3) {
                 respondWithError(res, 400, "Missing project or feed id");
@@ -162,6 +303,25 @@ void HttpServer::registerRoutes() {
                 respondWithError(res, 400, "Feed projectId does not match path project id");
                 return;
             }
+            auto asset = assetRepository_.findAssetById(feed.getAssetId());
+            if (!asset.has_value()) {
+                respondWithError(res, 400, "Feed asset does not exist");
+                return;
+            }
+            auto projectOpt = projectRepository_.findProjectById(projectId);
+            if (!projectOpt.has_value()) {
+                respondWithError(res, 404, "Project not found");
+                return;
+            }
+            const auto& assetIds = projectOpt->getAssetIds();
+            auto assetIt = std::find_if(assetIds.begin(), assetIds.end(),
+                                        [&](const core::AssetId& id) { return id == feed.getAssetId(); });
+            if (assetIt == assetIds.end()) {
+                assetRepository_.addAssetToProject(projectId, feed.getAssetId());
+                if (!updateProjectAssetList(projectId, feed.getAssetId(), true, res)) {
+                    return;
+                }
+            }
             feed.setId(core::FeedId{req.matches[2]});
             auto updated = feedRepository_.updateFeed(feed);
             res.status = 200;
@@ -171,7 +331,8 @@ void HttpServer::registerRoutes() {
         }
     });
 
-    registerDelete(R"(/projects/([^/]+)/feeds/(.+))", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+    registerDelete(R"(/projects/([^/]+)/feeds/(.+))",
+                   [this, updateProjectFeedList](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
             if (req.matches.size() < 3) {
                 respondWithError(res, 400, "Missing project or feed id");
@@ -192,6 +353,7 @@ void HttpServer::registerRoutes() {
                 }
             }
             feedRepository_.deleteFeed(projectId, feedId);
+            updateProjectFeedList(projectId, feedId, false, res);
             res.status = 204;
         } catch (const std::exception& ex) {
             respondWithError(res, 400, ex.what());
@@ -213,7 +375,8 @@ void HttpServer::registerRoutes() {
         }
     });
 
-    registerPost(R"(/projects/([^/]+)/scenes)", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+    registerPost(R"(/projects/([^/]+)/scenes)",
+                 [this, updateProjectSceneList](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
             if (req.matches.size() < 2) {
                 respondWithError(res, 400, "Missing project id");
@@ -240,6 +403,7 @@ void HttpServer::registerRoutes() {
             }
 
             auto created = sceneRepository_.createScene(scene);
+            updateProjectSceneList(projectId, created.getId(), true, res);
             if (verbose_) {
                 std::cerr << "[http] Created scene id=" << created.getId().value << std::endl;
             }
@@ -250,7 +414,8 @@ void HttpServer::registerRoutes() {
         }
     });
 
-    registerPut(R"(/projects/([^/]+)/scenes/(.+))", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+    registerPut(R"(/projects/([^/]+)/scenes/(.+))",
+                [this, updateProjectSceneList](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
             if (req.matches.size() < 3) {
                 respondWithError(res, 400, "Missing project or scene id");
@@ -273,6 +438,7 @@ void HttpServer::registerRoutes() {
             }
 
             auto updated = sceneRepository_.updateScene(scene);
+            updateProjectSceneList(projectId, updated.getId(), true, res);
             res.status = 200;
             res.set_content(json(updated).dump(), "application/json");
         } catch (const std::exception& ex) {
@@ -281,7 +447,7 @@ void HttpServer::registerRoutes() {
     });
 
     registerDelete(R"(/projects/([^/]+)/scenes/(.+))",
-                   [this](const ::httplib::Request& req, ::httplib::Response& res) {
+                   [this, updateProjectSceneList](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
             if (req.matches.size() < 3) {
                 respondWithError(res, 400, "Missing project or scene id");
@@ -300,6 +466,7 @@ void HttpServer::registerRoutes() {
                 }
             }
             sceneRepository_.deleteScene(projectId, sceneId);
+            updateProjectSceneList(projectId, sceneId, false, res);
             res.status = 204;
         } catch (const std::exception& ex) {
             respondWithError(res, 400, ex.what());
@@ -321,7 +488,8 @@ void HttpServer::registerRoutes() {
         }
     });
 
-    registerPost(R"(/projects/([^/]+)/cues)", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+    registerPost(R"(/projects/([^/]+)/cues)",
+                 [this, updateProjectCueOrder](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
             if (req.matches.size() < 2) {
                 respondWithError(res, 400, "Missing project id");
@@ -352,7 +520,8 @@ void HttpServer::registerRoutes() {
         }
     });
 
-    registerPut(R"(/projects/([^/]+)/cues/(.+))", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+    registerPut(R"(/projects/([^/]+)/cues/(.+))",
+                [this, updateProjectCueOrder](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
             if (req.matches.size() < 3) {
                 respondWithError(res, 400, "Missing project or cue id");
@@ -384,7 +553,8 @@ void HttpServer::registerRoutes() {
         }
     });
 
-    registerDelete(R"(/projects/([^/]+)/cues/(.+))", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+    registerDelete(R"(/projects/([^/]+)/cues/(.+))",
+                   [this, updateProjectCueOrder](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
             if (req.matches.size() < 3) {
                 respondWithError(res, 400, "Missing project or cue id");
@@ -405,6 +575,7 @@ void HttpServer::registerRoutes() {
                 }
             }
             cueRepository_.deleteCue(projectId, cueId);
+            updateProjectCueOrder(projectId, cueId, false, res);
             res.status = 204;
         } catch (const std::exception& ex) {
             respondWithError(res, 400, ex.what());
@@ -485,9 +656,12 @@ void HttpServer::registerRoutes() {
             auto project = body.get<core::Project>();
             log("Received project create id=" + project.getId().value + " name=" + project.getName() +
                 " cueCount=" + std::to_string(project.getCueOrder().size()));
+            auto assets = assetRepository_.listAssets();
+            auto feeds = feedRepository_.listFeeds(project.getId());
+            auto scenes = sceneRepository_.listScenes(project.getId());
             auto cues = cueRepository_.listCues(project.getId());
             std::string error;
-            if (!core::validateProjectCues(project, cues, error)) {
+            if (!core::validateProjectCues(project, assets, feeds, scenes, cues, error)) {
                 respondWithError(res, 400, error);
                 return;
             }
@@ -511,9 +685,12 @@ void HttpServer::registerRoutes() {
             project.setId(core::ProjectId{req.matches[1]});
             log("Received project update id=" + project.getId().value + " name=" + project.getName() +
                 " cueCount=" + std::to_string(project.getCueOrder().size()));
+            auto assets = assetRepository_.listAssets();
+            auto feeds = feedRepository_.listFeeds(project.getId());
+            auto scenes = sceneRepository_.listScenes(project.getId());
             auto cues = cueRepository_.listCues(project.getId());
             std::string error;
-            if (!core::validateProjectCues(project, cues, error)) {
+            if (!core::validateProjectCues(project, assets, feeds, scenes, cues, error)) {
                 respondWithError(res, 400, error);
                 return;
             }
@@ -542,29 +719,32 @@ void HttpServer::registerRoutes() {
 
     registerGet("/assets", [this](const ::httplib::Request&, ::httplib::Response& res) {
         try {
-            auto root = findAssetsRoot();
-            if (!root.has_value()) {
-                respondWithError(res, 404, "Assets directory not found.");
-                return;
-            }
-            json payload = json::array();
-            for (const auto& entry : std::filesystem::directory_iterator(*root)) {
-                if (!entry.is_regular_file()) {
-                    continue;
-                }
-                const auto path = entry.path();
-                const auto name = path.filename().string();
-                json asset{{"id", name}, {"name", name}, {"path", path.string()}, {"type", assetTypeForPath(path)}};
-                payload.push_back(asset);
-            }
+            const auto assets = assetRepository_.listAssets();
             res.status = 200;
-            res.set_content(payload.dump(), "application/json");
+            res.set_content(json(assets).dump(), "application/json");
         } catch (const std::exception& ex) {
             respondWithError(res, 500, ex.what());
         }
     });
 
-    registerPost("/assets", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+    registerGet(R"(/projects/([^/]+)/assets)", [this](const ::httplib::Request& req, ::httplib::Response& res) {
+        try {
+            if (req.matches.size() < 2) {
+                respondWithError(res, 400, "Missing project id");
+                return;
+            }
+            core::ProjectId projectId{req.matches[1]};
+            const auto assets = assetRepository_.listAssetsForProject(projectId);
+            res.status = 200;
+            res.set_content(json(assets).dump(), "application/json");
+        } catch (const std::exception& ex) {
+            respondWithError(res, 500, ex.what());
+        }
+    });
+
+    auto handleAssetUpload = [this, updateProjectAssetList](const ::httplib::Request& req,
+                                                            ::httplib::Response& res,
+                                                            const std::optional<core::ProjectId>& projectId) {
         constexpr uint64_t kMaxAssetBytes = 2ull * 1024ull * 1024ull * 1024ull;
         try {
             auto lengthHeader = req.get_header_value("Content-Length");
@@ -627,12 +807,79 @@ void HttpServer::registerRoutes() {
                 return;
             }
 
-            json asset{{"id", *safeName},
-                       {"name", *safeName},
-                       {"path", targetPath.string()},
-                       {"type", assetTypeForPath(targetPath)}};
+            const auto assetType = assetTypeForPath(targetPath);
+            if (!assetType.has_value()) {
+                respondWithError(res, 400, "Unsupported asset type.");
+                return;
+            }
+
+            core::Asset asset{core::AssetId{}, *safeName, *assetType, targetPath.string(), {}};
+            auto created = assetRepository_.createAsset(asset);
+
+            if (projectId.has_value()) {
+                assetRepository_.addAssetToProject(*projectId, created.getId());
+                updateProjectAssetList(*projectId, created.getId(), true, res);
+            }
+
             res.status = 201;
-            res.set_content(asset.dump(), "application/json");
+            res.set_content(json(created).dump(), "application/json");
+        } catch (const std::exception& ex) {
+            respondWithError(res, 500, ex.what());
+        }
+    };
+
+    registerPost("/assets", [this, handleAssetUpload](const ::httplib::Request& req, ::httplib::Response& res) {
+        handleAssetUpload(req, res, std::nullopt);
+    });
+
+    registerPost(R"(/projects/([^/]+)/assets)", [this, handleAssetUpload](const ::httplib::Request& req,
+                                                                         ::httplib::Response& res) {
+        if (req.matches.size() < 2) {
+            respondWithError(res, 400, "Missing project id");
+            return;
+        }
+        core::ProjectId projectId{req.matches[1]};
+        handleAssetUpload(req, res, projectId);
+    });
+
+    registerPost(R"(/projects/([^/]+)/assets/(.+))", [this, updateProjectAssetList](const ::httplib::Request& req,
+                                                                                  ::httplib::Response& res) {
+        try {
+            if (req.matches.size() < 3) {
+                respondWithError(res, 400, "Missing project or asset id");
+                return;
+            }
+            core::ProjectId projectId{req.matches[1]};
+            core::AssetId assetId{req.matches[2]};
+            auto asset = assetRepository_.findAssetById(assetId);
+            if (!asset.has_value()) {
+                respondWithError(res, 404, "Asset not found");
+                return;
+            }
+            assetRepository_.addAssetToProject(projectId, assetId);
+            if (!updateProjectAssetList(projectId, assetId, true, res)) {
+                return;
+            }
+            res.status = 204;
+        } catch (const std::exception& ex) {
+            respondWithError(res, 500, ex.what());
+        }
+    });
+
+    registerDelete(R"(/projects/([^/]+)/assets/(.+))", [this, updateProjectAssetList](const ::httplib::Request& req,
+                                                                                    ::httplib::Response& res) {
+        try {
+            if (req.matches.size() < 3) {
+                respondWithError(res, 400, "Missing project or asset id");
+                return;
+            }
+            core::ProjectId projectId{req.matches[1]};
+            core::AssetId assetId{req.matches[2]};
+            assetRepository_.removeAssetFromProject(projectId, assetId);
+            if (!updateProjectAssetList(projectId, assetId, false, res)) {
+                return;
+            }
+            res.status = 204;
         } catch (const std::exception& ex) {
             respondWithError(res, 500, ex.what());
         }
@@ -641,28 +888,34 @@ void HttpServer::registerRoutes() {
     registerDelete(R"(/assets/(.+))", [this](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
             if (req.matches.size() < 2) {
-                respondWithError(res, 400, "Missing asset name");
+                respondWithError(res, 400, "Missing asset id");
                 return;
             }
-            const auto safeName = sanitizeAssetName(std::string(req.matches[1]));
-            if (!safeName.has_value()) {
-                respondWithError(res, 400, "Invalid asset filename.");
-                return;
-            }
-
-            auto root = findAssetsRoot();
-            if (!root.has_value()) {
-                respondWithError(res, 404, "Assets directory not found.");
-                return;
-            }
-
-            const auto targetPath = *root / *safeName;
-            if (!std::filesystem::exists(targetPath)) {
+            core::AssetId assetId{req.matches[1]};
+            auto asset = assetRepository_.findAssetById(assetId);
+            if (!asset.has_value()) {
                 respondWithError(res, 404, "Asset not found.");
                 return;
             }
 
-            std::filesystem::remove(targetPath);
+            const auto targetPath = std::filesystem::path(asset->getPath());
+            if (std::filesystem::exists(targetPath)) {
+                std::filesystem::remove(targetPath);
+            }
+            assetRepository_.deleteAsset(assetId);
+            // Ensure projects drop the asset id from their lists.
+            auto projects = projectRepository_.listProjects();
+            for (auto& project : projects) {
+                auto& assetIds = project.getAssetIds();
+                auto before = assetIds.size();
+                assetIds.erase(std::remove_if(assetIds.begin(), assetIds.end(),
+                                              [&](const core::AssetId& id) { return id == assetId; }),
+                               assetIds.end());
+                if (assetIds.size() != before) {
+                    project.setUpdatedAt(nowIso8601Utc());
+                    projectRepository_.updateProject(project);
+                }
+            }
             res.status = 204;
         } catch (const std::exception& ex) {
             respondWithError(res, 500, ex.what());
@@ -726,6 +979,11 @@ void HttpServer::registerRoutes() {
                 respondWithError(res, 400, error);
                 return;
             }
+            std::vector<core::Asset> assets;
+            if (!collectAssetsForFeeds(feeds, assets, error)) {
+                respondWithError(res, 400, error);
+                return;
+            }
 
             if (verbose_) {
                 std::cerr << "[http] Forwarding scene project=" << projectId.value << " id=" << sceneId.value
@@ -734,7 +992,7 @@ void HttpServer::registerRoutes() {
             core::RendererMessage message{};
             message.type = core::RendererMessageType::LoadSceneDefinition;
             message.commandId = generateCommandId();
-            message.loadSceneDefinition = core::LoadSceneDefinitionMessage{*scene, feeds};
+            message.loadSceneDefinition = core::LoadSceneDefinitionMessage{*scene, feeds, assets};
 
             size_t sentCount = rendererRegistry_->broadcastMessage(message);
             if (sentCount == 0) {
@@ -804,6 +1062,11 @@ void HttpServer::registerRoutes() {
                 respondWithError(res, 400, feedError);
                 return;
             }
+            std::vector<core::Asset> assets;
+            if (!collectAssetsForFeeds(rendererFeeds, assets, feedError)) {
+                respondWithError(res, 400, feedError);
+                return;
+            }
 
             if (verbose_) {
                 std::cerr << "[http] Forwarding cue project=" << projectId.value << " id=" << cueId.value
@@ -814,7 +1077,7 @@ void HttpServer::registerRoutes() {
             core::RendererMessage message{};
             message.type = core::RendererMessageType::LoadSceneDefinition;
             message.commandId = generateCommandId();
-            message.loadSceneDefinition = core::LoadSceneDefinitionMessage{sceneWithCue, rendererFeeds};
+            message.loadSceneDefinition = core::LoadSceneDefinitionMessage{sceneWithCue, rendererFeeds, assets};
 
             size_t sentCount = rendererRegistry_->broadcastMessage(message);
             if (sentCount == 0) {
@@ -894,121 +1157,6 @@ void HttpServer::registerRoutes() {
                             "application/json");
         } catch (const json::exception& ex) {
             respondWithError(res, 400, ex.what());
-        } catch (const std::exception& ex) {
-            respondWithError(res, 500, ex.what());
-        }
-    });
-
-    registerPost("/demo/two-video-test", [this](const ::httplib::Request&, ::httplib::Response& res) {
-        if (!rendererRegistry_) {
-            respondWithError(res, 500, "Renderer registry not configured");
-            return;
-        }
-
-        try {
-            const auto suffix = generateCommandId();
-            const auto projectId = core::ProjectId{"demo-" + suffix};
-
-            auto findAssetPath = [](const std::string& filename) -> std::optional<std::filesystem::path> {
-                std::vector<std::filesystem::path> candidates = {
-                    std::filesystem::current_path() / "data" / "assets" / filename,
-                    std::filesystem::current_path().parent_path() / "data" / "assets" / filename,
-                    std::filesystem::current_path().parent_path().parent_path() / "data" / "assets" / filename};
-#ifdef PROJECTION_MAPPER_ROOT_DIR
-                candidates.emplace_back(std::filesystem::path(PROJECTION_MAPPER_ROOT_DIR) / "data" / "assets" / filename);
-#endif
-                for (const auto& candidate : candidates) {
-                    if (std::filesystem::exists(candidate)) {
-                        return std::filesystem::weakly_canonical(candidate);
-                    }
-                }
-                return std::nullopt;
-            };
-
-            const auto clipAPath = findAssetPath("clipA.mp4");
-            const auto clipBPath = findAssetPath("clipB.mp4");
-            if (!clipAPath.has_value() || !clipBPath.has_value()) {
-                respondWithError(res, 500, "Demo assets not found under data/assets (expected clipA.mp4 and clipB.mp4)");
-                return;
-            }
-
-            core::Project demoProject(projectId, "Demo Project " + suffix, "Auto-generated demo project", {},
-                                      core::ProjectSettings{});
-            projectRepository_.createProject(demoProject);
-
-            nlohmann::json clipAConfig{{"filePath", clipAPath->string()}};
-            nlohmann::json clipBConfig{{"filePath", clipBPath->string()}};
-
-            core::Feed feedA(projectId, core::FeedId{}, "Demo Clip A", core::FeedType::VideoFile, clipAConfig.dump());
-            core::Feed feedB(projectId, core::FeedId{}, "Demo Clip B", core::FeedType::VideoFile, clipBConfig.dump());
-
-            feedA = feedRepository_.createFeed(feedA);
-            feedB = feedRepository_.createFeed(feedB);
-
-            std::vector<core::Vec2> quadA{{-0.8f, -0.6f}, {-0.1f, -0.5f}, {-0.1f, 0.2f}, {-0.8f, 0.1f}};
-            std::vector<core::Vec2> quadB{{0.1f, -0.3f}, {0.8f, -0.2f}, {0.7f, 0.5f}, {0.0f, 0.4f}};
-
-            core::Surface surfaceA(core::SurfaceId{"demo-surface-a-" + suffix}, "Demo Surface A", quadA, feedA.getId());
-            core::Surface surfaceB(core::SurfaceId{"demo-surface-b-" + suffix}, "Demo Surface B", quadB, feedB.getId());
-
-            core::Scene scene(projectId, core::SceneId{}, "Two Video Demo Scene", "Auto-generated demo scene",
-                              std::vector<core::Surface>{surfaceA, surfaceB});
-
-            auto feeds = feedRepository_.listFeeds(projectId);
-            std::string validationError;
-            if (!core::validateSceneFeeds(scene, feeds, validationError)) {
-                respondWithError(res, 400, validationError);
-                return;
-            }
-
-            auto createdScene = sceneRepository_.createScene(scene);
-
-            std::vector<core::Feed> rendererFeeds;
-            std::string error;
-            if (!collectFeedsForScene(createdScene, rendererFeeds, error)) {
-                respondWithError(res, 400, error);
-                return;
-            }
-
-            if (verbose_) {
-                std::cerr << "[http] Demo endpoint created project " << projectId.value << " scene "
-                          << createdScene.getId().value << " with feeds " << feedA.getId().value << ","
-                          << feedB.getId().value << " -> sending to renderer" << std::endl;
-            }
-            core::RendererMessage message{};
-            message.type = core::RendererMessageType::LoadSceneDefinition;
-            message.commandId = generateCommandId();
-            message.loadSceneDefinition = core::LoadSceneDefinitionMessage{createdScene, rendererFeeds};
-
-            size_t sentCount = rendererRegistry_->broadcastMessage(message);
-            if (sentCount == 0) {
-                respondWithError(res, 503, "No renderers connected");
-                return;
-            }
-
-            json payload{{"projectId", projectId.value},
-                         {"sceneId", createdScene.getId().value},
-                         {"feedIds", json::array({feedA.getId().value, feedB.getId().value})},
-                         {"surfaceIds", json::array({surfaceA.getId().value, surfaceB.getId().value})}};
-            res.status = 200;
-            res.set_content(payload.dump(), "application/json");
-        } catch (const std::exception& ex) {
-            respondWithError(res, 500, ex.what());
-        }
-    });
-
-    registerPost("/demo/clear-projects", [this](const ::httplib::Request&, ::httplib::Response& res) {
-        try {
-            const auto projects = projectRepository_.listProjects();
-            std::size_t deleted = 0;
-            for (const auto& project : projects) {
-                if (project.getId().value.rfind("demo-", 0) == 0) {
-                    projectRepository_.deleteProject(project.getId());
-                    ++deleted;
-                }
-            }
-            res.status = 200;
-            res.set_content(json({{"deletedProjects", deleted}}).dump(), "application/json");
         } catch (const std::exception& ex) {
             respondWithError(res, 500, ex.what());
         }
@@ -1122,6 +1270,23 @@ bool HttpServer::collectFeedsForScene(const core::Scene& scene, std::vector<core
         feeds.push_back(it->second);
     }
 
+    return true;
+}
+
+bool HttpServer::collectAssetsForFeeds(const std::vector<core::Feed>& feeds, std::vector<core::Asset>& assets,
+                                       std::string& error) {
+    std::unordered_set<std::string> seen;
+    for (const auto& feed : feeds) {
+        auto asset = assetRepository_.findAssetById(feed.getAssetId());
+        if (!asset.has_value()) {
+            error = "Feed '" + feed.getId().value + "' references missing asset '" + feed.getAssetId().value + "'.";
+            return false;
+        }
+        if (seen.insert(asset->getId().value).second) {
+            assets.push_back(*asset);
+        }
+    }
+    error.clear();
     return true;
 }
 

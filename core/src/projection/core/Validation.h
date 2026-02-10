@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include "projection/core/Asset.h"
 #include "projection/core/Cue.h"
 #include "projection/core/Feed.h"
 #include "projection/core/Project.h"
@@ -20,7 +21,9 @@ bool validateSceneFeeds(const Scene& scene, const std::vector<Feed>& feeds, std:
 // Ensures that a cue refers to the provided scene and only references surfaces contained in that scene.
 bool validateCueForScene(const Cue& cue, const Scene& scene, std::string& errorMessage);
 
-// Ensures that all cues referenced by the project exist in the provided list and preserves ordering.
-bool validateProjectCues(const Project& project, const std::vector<Cue>& cues, std::string& errorMessage);
+// Ensures that all project collections reference existing entities and preserves cue ordering.
+bool validateProjectCues(const Project& project, const std::vector<Asset>& assets, const std::vector<Feed>& feeds,
+                         const std::vector<Scene>& scenes, const std::vector<Cue>& cues,
+                         std::string& errorMessage);
 
 }  // namespace projection::core

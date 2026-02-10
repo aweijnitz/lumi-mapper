@@ -16,7 +16,8 @@ const asset: Asset = {
   id: "asset-1",
   name: "Clip A",
   path: "/data/assets/clipA.mp4",
-  type: "video",
+  type: "VideoFile",
+  variants: [],
 };
 
 beforeEach(() => {

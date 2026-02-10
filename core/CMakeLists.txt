@@ -6,6 +6,8 @@ set(CORE_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 add_library(projection_core
     ${CORE_SOURCE_DIR}/projection/core/CoreInit.cpp
+    ${CORE_SOURCE_DIR}/projection/core/Asset.cpp
+    ${CORE_SOURCE_DIR}/projection/core/Asset.h
     ${CORE_SOURCE_DIR}/projection/core/Ids.h
     ${CORE_SOURCE_DIR}/projection/core/Enums.h
     ${CORE_SOURCE_DIR}/projection/core/Feed.cpp

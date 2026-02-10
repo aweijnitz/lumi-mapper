@@ -119,7 +119,7 @@ void from_json(const json& j, LoadSceneMessage& message) {
 }
 
 void to_json(json& j, const LoadSceneDefinitionMessage& message) {
-  j = json{{"scene", message.scene}, {"feeds", message.feeds}};
+  j = json{{"scene", message.scene}, {"feeds", message.feeds}, {"assets", message.assets}};
 }
 
 void from_json(const json& j, LoadSceneDefinitionMessage& message) {
@@ -143,6 +143,15 @@ void from_json(const json& j, LoadSceneDefinitionMessage& message) {
     throw std::runtime_error("Field 'feeds' must be an array");
   }
   message.feeds = feedsJson.get<std::vector<Feed>>();
+
+  if (!j.contains("assets")) {
+    throw std::runtime_error("Missing required field: assets");
+  }
+  const auto& assetsJson = j.at("assets");
+  if (!assetsJson.is_array()) {
+    throw std::runtime_error("Field 'assets' must be an array");
+  }
+  message.assets = assetsJson.get<std::vector<Asset>>();
 }
 
 void to_json(json& j, const SetFeedForSurfaceMessage& message) {

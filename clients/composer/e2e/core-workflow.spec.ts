@@ -3,7 +3,12 @@ import { test, expect } from "@playwright/test";
 test("workflow creates project, feed, scene, surface, cue, saves, and plays", async ({ page }) => {
   const state = {
     projectId: "",
-    feeds: [] as Array<{ id: string; name: string; type: string; configJson: { filePath: string } }>,
+    feeds: [] as Array<{
+      id: string;
+      name: string;
+      assetId: string;
+      settings?: { variantPath?: string; monochrome?: boolean };
+    }>,
     scenes: [] as Array<{ id: string; name: string; description: string; surfaces: unknown[] }>,
     cues: [] as Array<{ id: string; name: string; sceneId: string }>,
   };
@@ -41,7 +46,13 @@ test("workflow creates project, feed, scene, surface, cue, saves, and plays", as
         status: 200,
         contentType: "application/json",
         body: JSON.stringify([
-          { id: "asset-1", name: "Clip A", path: "/data/assets/clipA.mp4", type: "video" },
+          {
+            id: "asset-1",
+            name: "Clip A",
+            type: "VideoFile",
+            path: "/data/assets/clipA.mp4",
+            variants: [],
+          },
         ]),
       });
       return;
@@ -237,7 +248,7 @@ test("workflow creates project, feed, scene, surface, cue, saves, and plays", as
   const cuePayload = (await cueRequestPromise).postDataJSON();
   const projectPayload = (await projectUpdatePromise).postDataJSON();
 
-  expect(feedPayload.configJson.filePath).toBe("/data/assets/clipA.mp4");
+  expect(feedPayload.assetId).toBe("asset-1");
   expect(scenePayload.surfaces).toHaveLength(0);
   expect(cuePayload.sceneId).toBe(scenePayload.id);
   expect(projectPayload.cueOrder).toContain(cuePayload.id);

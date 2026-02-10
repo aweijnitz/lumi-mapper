@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include "projection/core/Asset.h"
 #include "projection/core/Cue.h"
 #include "projection/core/Feed.h"
 #include "projection/core/Project.h"
@@ -13,7 +14,7 @@
 using namespace projection::core;
 
 TEST_CASE("validateSceneFeeds succeeds when surfaces and feeds are consistent", "[validation]") {
-  Feed feed{makeProjectId("proj-1"), makeFeedId("feed-1"), "Camera", FeedType::Camera, "{}"};
+  Feed feed{makeProjectId("proj-1"), makeFeedId("feed-1"), "Feed", makeAssetId("asset-1")};
   std::vector<Vec2> quad{{0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f}};
   Surface surface{makeSurfaceId("surface-1"), "Quad", quad, feed.getId()};
   Scene scene{makeProjectId("proj-1"), makeSceneId("scene-1"), "Scene", "", {surface}};
@@ -24,7 +25,7 @@ TEST_CASE("validateSceneFeeds succeeds when surfaces and feeds are consistent", 
 }
 
 TEST_CASE("validateSceneFeeds fails when surface is invalid", "[validation]") {
-  Feed feed{makeProjectId("proj-1"), makeFeedId("feed-1"), "Camera", FeedType::Camera, "{}"};
+  Feed feed{makeProjectId("proj-1"), makeFeedId("feed-1"), "Feed", makeAssetId("asset-1")};
   Surface invalidSurface{makeSurfaceId("bad"), "Invalid", {}, feed.getId()};
   Scene scene{makeProjectId("proj-1"), makeSceneId("scene-1"), "Scene", "", {invalidSurface}};
   std::string errorMessage;
@@ -34,7 +35,7 @@ TEST_CASE("validateSceneFeeds fails when surface is invalid", "[validation]") {
 }
 
 TEST_CASE("validateSceneFeeds fails when feed reference is missing", "[validation]") {
-  Feed feed{makeProjectId("proj-1"), makeFeedId("feed-1"), "Camera", FeedType::Camera, "{}"};
+  Feed feed{makeProjectId("proj-1"), makeFeedId("feed-1"), "Feed", makeAssetId("asset-1")};
   std::vector<Vec2> triangle{{0.0f, 0.0f}, {1.0f, 0.0f}, {0.0f, 1.0f}};
   Surface missingFeedSurface{makeSurfaceId("missing-feed"), "Missing", triangle, makeFeedId("other")};
   Scene scene{makeProjectId("proj-1"), makeSceneId("scene-1"), "Scene", "", {missingFeedSurface}};
@@ -45,7 +46,7 @@ TEST_CASE("validateSceneFeeds fails when feed reference is missing", "[validatio
 }
 
 TEST_CASE("validateSceneFeeds fails when feed project does not match scene", "[validation]") {
-  Feed feed{makeProjectId("proj-2"), makeFeedId("feed-1"), "Camera", FeedType::Camera, "{}"};
+  Feed feed{makeProjectId("proj-2"), makeFeedId("feed-1"), "Feed", makeAssetId("asset-1")};
   std::vector<Vec2> quad{{0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f}};
   Surface surface{makeSurfaceId("surface-1"), "Quad", quad, feed.getId()};
   Scene scene{makeProjectId("proj-1"), makeSceneId("scene-1"), "Scene", "", {surface}};
@@ -64,7 +65,7 @@ TEST_CASE("validateSceneFeeds succeeds for empty scene regardless of feeds", "[v
 }
 
 TEST_CASE("validateCueForScene ensures scene matches and surfaces exist", "[validation]") {
-  Feed feed{makeProjectId("proj-1"), makeFeedId("feed-1"), "Camera", FeedType::Camera, "{}"};
+  Feed feed{makeProjectId("proj-1"), makeFeedId("feed-1"), "Feed", makeAssetId("asset-1")};
   std::vector<Vec2> quad{{0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f}};
   Surface surfaceA{makeSurfaceId("A"), "A", quad, feed.getId()};
   Surface surfaceB{makeSurfaceId("B"), "B", quad, feed.getId()};
@@ -80,7 +81,7 @@ TEST_CASE("validateCueForScene ensures scene matches and surfaces exist", "[vali
 }
 
 TEST_CASE("validateCueForScene fails when scenes do not match", "[validation]") {
-  Feed feed{makeProjectId("proj-1"), makeFeedId("feed-1"), "Camera", FeedType::Camera, "{}"};
+  Feed feed{makeProjectId("proj-1"), makeFeedId("feed-1"), "Feed", makeAssetId("asset-1")};
   std::vector<Vec2> quad{{0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f}};
   Surface surfaceA{makeSurfaceId("A"), "A", quad, feed.getId()};
   Scene scene{makeProjectId("proj-1"), makeSceneId("scene-1"), "Scene", "", {surfaceA}};
@@ -92,7 +93,7 @@ TEST_CASE("validateCueForScene fails when scenes do not match", "[validation]") 
 }
 
 TEST_CASE("validateCueForScene fails when project ids do not match", "[validation]") {
-  Feed feed{makeProjectId("proj-1"), makeFeedId("feed-1"), "Camera", FeedType::Camera, "{}"};
+  Feed feed{makeProjectId("proj-1"), makeFeedId("feed-1"), "Feed", makeAssetId("asset-1")};
   std::vector<Vec2> quad{{0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f}};
   Surface surfaceA{makeSurfaceId("A"), "A", quad, feed.getId()};
   Scene scene{makeProjectId("proj-1"), makeSceneId("scene-1"), "Scene", "", {surfaceA}};
@@ -104,7 +105,7 @@ TEST_CASE("validateCueForScene fails when project ids do not match", "[validatio
 }
 
 TEST_CASE("validateCueForScene fails when opacity map references missing surface", "[validation]") {
-  Feed feed{makeProjectId("proj-1"), makeFeedId("feed-1"), "Camera", FeedType::Camera, "{}"};
+  Feed feed{makeProjectId("proj-1"), makeFeedId("feed-1"), "Feed", makeAssetId("asset-1")};
   std::vector<Vec2> quad{{0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f}};
   Surface surfaceA{makeSurfaceId("A"), "A", quad, feed.getId()};
   Scene scene{makeProjectId("proj-1"), makeSceneId("scene-1"), "Scene", "", {surfaceA}};
@@ -117,7 +118,7 @@ TEST_CASE("validateCueForScene fails when opacity map references missing surface
 }
 
 TEST_CASE("validateCueForScene fails when brightness map references missing surface", "[validation]") {
-  Feed feed{makeProjectId("proj-1"), makeFeedId("feed-1"), "Camera", FeedType::Camera, "{}"};
+  Feed feed{makeProjectId("proj-1"), makeFeedId("feed-1"), "Feed", makeAssetId("asset-1")};
   std::vector<Vec2> quad{{0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f}};
   Surface surfaceA{makeSurfaceId("A"), "A", quad, feed.getId()};
   Scene scene{makeProjectId("proj-1"), makeSceneId("scene-1"), "Scene", "", {surfaceA}};
@@ -130,7 +131,7 @@ TEST_CASE("validateCueForScene fails when brightness map references missing surf
 }
 
 TEST_CASE("validateCueForScene succeeds for cue with no surface entries", "[validation]") {
-  Feed feed{makeProjectId("proj-1"), makeFeedId("feed-1"), "Camera", FeedType::Camera, "{}"};
+  Feed feed{makeProjectId("proj-1"), makeFeedId("feed-1"), "Feed", makeAssetId("asset-1")};
   std::vector<Vec2> quad{{0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f}};
   Surface surfaceA{makeSurfaceId("A"), "A", quad, feed.getId()};
   Scene scene{makeProjectId("proj-1"), makeSceneId("scene-1"), "Scene", "", {surfaceA}};
@@ -148,28 +149,64 @@ TEST_CASE("validateProjectCues ensures references exist and settings are sane", 
   ProjectSettings settings;
   settings.midiChannels = {1, 5};
   settings.controllers["fader1"] = "master";
-  Project project{makeProjectId("proj-1"), "Show", "desc", {cueA.getId(), cueB.getId()}, settings};
+  Project project{makeProjectId("proj-1"),
+                  "Show",
+                  "desc",
+                  "2026-02-02T10:00:00Z",
+                  "2026-02-02T10:10:00Z",
+                  {makeAssetId("asset-1")},
+                  {makeSceneId("scene-1")},
+                  {makeFeedId("feed-1")},
+                  {cueA.getId(), cueB.getId()},
+                  settings};
 
   std::string errorMessage;
-  REQUIRE(validateProjectCues(project, {cueA, cueB}, errorMessage));
+  REQUIRE(validateProjectCues(project, {Asset{makeAssetId("asset-1"), "A", AssetType::VideoFile, "path"}},
+                              {Feed{makeProjectId("proj-1"), makeFeedId("feed-1"), "Feed", makeAssetId("asset-1")}},
+                              {Scene{makeProjectId("proj-1"), makeSceneId("scene-1"), "Scene", "", {}}},
+                              {cueA, cueB}, errorMessage));
   REQUIRE(errorMessage.empty());
 }
 
 TEST_CASE("validateProjectCues fails for missing cue references", "[validation][project]") {
   Cue cueA{makeProjectId("proj-1"), makeCueId("cue-A"), "A", makeSceneId("scene-1")};
-  Project project{makeProjectId("proj-1"), "Show", "desc", {cueA.getId(), makeCueId("missing")}, {}};
+  Project project{makeProjectId("proj-1"),
+                  "Show",
+                  "desc",
+                  "2026-02-02T10:00:00Z",
+                  "2026-02-02T10:10:00Z",
+                  {makeAssetId("asset-1")},
+                  {makeSceneId("scene-1")},
+                  {makeFeedId("feed-1")},
+                  {cueA.getId(), makeCueId("missing")},
+                  {}};
   std::string errorMessage;
 
-  REQUIRE(!validateProjectCues(project, {cueA}, errorMessage));
+  REQUIRE(!validateProjectCues(project, {Asset{makeAssetId("asset-1"), "A", AssetType::VideoFile, "path"}},
+                               {Feed{makeProjectId("proj-1"), makeFeedId("feed-1"), "Feed", makeAssetId("asset-1")}},
+                               {Scene{makeProjectId("proj-1"), makeSceneId("scene-1"), "Scene", "", {}}},
+                               {cueA}, errorMessage));
   REQUIRE(!errorMessage.empty());
 }
 
 TEST_CASE("validateProjectCues fails when cue project id differs", "[validation][project]") {
   Cue cueA{makeProjectId("proj-2"), makeCueId("cue-A"), "A", makeSceneId("scene-1")};
-  Project project{makeProjectId("proj-1"), "Show", "desc", {cueA.getId()}, {}};
+  Project project{makeProjectId("proj-1"),
+                  "Show",
+                  "desc",
+                  "2026-02-02T10:00:00Z",
+                  "2026-02-02T10:10:00Z",
+                  {makeAssetId("asset-1")},
+                  {makeSceneId("scene-1")},
+                  {makeFeedId("feed-1")},
+                  {cueA.getId()},
+                  {}};
   std::string errorMessage;
 
-  REQUIRE(!validateProjectCues(project, {cueA}, errorMessage));
+  REQUIRE(!validateProjectCues(project, {Asset{makeAssetId("asset-1"), "A", AssetType::VideoFile, "path"}},
+                               {Feed{makeProjectId("proj-1"), makeFeedId("feed-1"), "Feed", makeAssetId("asset-1")}},
+                               {Scene{makeProjectId("proj-1"), makeSceneId("scene-1"), "Scene", "", {}}},
+                               {cueA}, errorMessage));
   REQUIRE(!errorMessage.empty());
 }
 
@@ -177,13 +214,28 @@ TEST_CASE("validateProjectCues validates MIDI channel range and required name", 
   Cue cueA{makeProjectId("proj-1"), makeCueId("cue-A"), "A", makeSceneId("scene-1")};
   ProjectSettings settings;
   settings.midiChannels = {0};
-  Project project{makeProjectId("proj-1"), "", "desc", {cueA.getId()}, settings};
+  Project project{makeProjectId("proj-1"),
+                  "",
+                  "desc",
+                  "2026-02-02T10:00:00Z",
+                  "2026-02-02T10:10:00Z",
+                  {makeAssetId("asset-1")},
+                  {makeSceneId("scene-1")},
+                  {makeFeedId("feed-1")},
+                  {cueA.getId()},
+                  settings};
   std::string errorMessage;
 
-  REQUIRE(!validateProjectCues(project, {cueA}, errorMessage));
+  REQUIRE(!validateProjectCues(project, {Asset{makeAssetId("asset-1"), "A", AssetType::VideoFile, "path"}},
+                               {Feed{makeProjectId("proj-1"), makeFeedId("feed-1"), "Feed", makeAssetId("asset-1")}},
+                               {Scene{makeProjectId("proj-1"), makeSceneId("scene-1"), "Scene", "", {}}},
+                               {cueA}, errorMessage));
   REQUIRE(!errorMessage.empty());
 
   project.setName("Show");
-  REQUIRE(!validateProjectCues(project, {cueA}, errorMessage));
+  REQUIRE(!validateProjectCues(project, {Asset{makeAssetId("asset-1"), "A", AssetType::VideoFile, "path"}},
+                               {Feed{makeProjectId("proj-1"), makeFeedId("feed-1"), "Feed", makeAssetId("asset-1")}},
+                               {Scene{makeProjectId("proj-1"), makeSceneId("scene-1"), "Scene", "", {}}},
+                               {cueA}, errorMessage));
   REQUIRE(!errorMessage.empty());
 }

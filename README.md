@@ -20,7 +20,7 @@ The project is a C++-centric monorepo with four main components:
 
 - **`/core` – Core Library**
   - Pure C++ domain model and logic.
-  - Knows about: Projects, Scenes (filter settings), Surfaces (polygon/ellipse, blend, rotation, z-order), Feeds, Cues.
+  - Knows about: Projects, Assets, Scenes (filter settings), Surfaces (polygon/ellipse, blend, rotation, z-order), Feeds, Cues.
   - Provides JSON serialization (via nlohmann::json), renderer protocol structs, and validation helpers for the domain entities.
   - No rendering, DB, or networking dependencies.
 
@@ -29,7 +29,7 @@ The project is a C++-centric monorepo with four main components:
   - Persists state to **SQLite3 (embedded, file-based)** and manages asset metadata.
   - Exposes a **remote API** over TCP/IP for clients.
   - Talks to the Renderer via a local **control protocol** (newline-delimited JSON over TCP).
-  - Serves assets (`/assets`), renderer status/controls (`/renderer/*`), and demo helpers (`/demo/*`).
+  - Serves assets (`/assets`) and renderer status/controls (`/renderer/*`).
 
 - **`/renderer` – Renderer**
   - C++ application using **openFrameworks** (optional `ofxMidi` addon).
@@ -46,9 +46,9 @@ Assets (images, video files, etc.) are stored on the filesystem (e.g. `./data/as
 
 ### Core library capabilities
 
-- Domain classes for IDs/enums plus Feed, Surface, Scene, and Cue.
+- Domain classes for IDs/enums plus Asset, Feed, Surface, Scene, and Cue.
 - JSON serialization/deserialization for the main entities and helper types (including renderer protocol messages).
-- Validation helpers to confirm references between surfaces, feeds, scenes, and cues.
+- Validation helpers to confirm references between assets, feeds, surfaces, scenes, and cues.
 - Scene settings (filters) and surface geometry (polygon + ellipse, rotation, blend modes).
 
 ---
@@ -72,22 +72,66 @@ Assets (images, video files, etc.) are stored on the filesystem (e.g. `./data/as
 
 The core library models a few key entities that the server, renderer, and clients share:
 
-- **Project** – show-level container with cue ordering and settings (controllers, MIDI channels, globals).
-- **Feed** – a project-scoped source of pixels (video or image file, camera, generated content) with configuration metadata. The renderer currently loads VideoFile and ImageFile feeds.
+- **Project** – show-level container with cue ordering, timestamps, settings (controllers, MIDI channels, globals), and explicit ID collections.
+- **Asset** – media file record (image or video) with optional variants; can be associated with multiple projects.
+- **Feed** – a project-scoped wrapper around an Asset with project-specific settings (variant selection, monochrome, pan settings).
 - **Surface** – a polygon/ellipse within a Scene; references a Feed by id with blend/opacity/brightness/rotation controls.
 - **Scene** – a project-scoped collection of Surfaces plus scene-level filter settings.
 - **Cue** – a project-scoped reference to a Scene with optional per-surface opacity/brightness overrides.
 
+### Object model (data relationships)
+
 ```mermaid
 erDiagram
+  PROJECT {
+    string id
+    string name
+    string description
+    string createdAt
+    string updatedAt
+    string[] assetIds
+    string[] sceneIds
+    string[] feedIds
+    string[] cueOrder
+  }
+  ASSET {
+    string id
+    string name
+    string type
+    string path
+  }
+  FEED {
+    string id
+    string name
+    string assetId
+  }
+  SCENE {
+    string id
+    string name
+    string description
+  }
+  SURFACE {
+    string id
+    string name
+    string feedId
+  }
+  CUE {
+    string id
+    string name
+    string sceneId
+  }
+  PROJECT }o..o{ ASSET : "project_assets"
   PROJECT ||..o{ FEED : "scopes"
   PROJECT ||..o{ SCENE : "scopes"
   PROJECT ||..o{ CUE : "scopes (cueOrder)"
+  FEED }o--|| ASSET : "references"
   SCENE ||--o{ SURFACE : "contains"
   FEED ||..o{ SURFACE : "source_for"
   SCENE ||..o{ CUE : "referenced_by"
   CUE }o..o{ SURFACE : "overrides"
 ```
+
+ 
 
 Surfaces are embedded within their parent Scene (not stored as top-level entities), and cue ordering lives on Project as `cueOrder`.
 
@@ -211,11 +255,17 @@ curl http://localhost:8080/api/renderer/ping
 
 curl -X POST http://localhost:8080/api/projects \
   -H "Content-Type: application/json" \
-  -d '{"id":"project-1","name":"Demo Project","description":"","cueOrder":[],"settings":{"controllers":{},"midiChannels":[],"globalConfig":{}}}'
+  -d '{"id":"project-1","name":"Demo Project","description":"","createdAt":"2026-02-02T10:00:00Z","updatedAt":"2026-02-02T10:00:00Z","assetIds":[],"sceneIds":[],"feedIds":[],"cueOrder":[],"settings":{"controllers":{},"midiChannels":[],"globalConfig":{}}}'
+
+curl -X POST http://localhost:8080/api/assets \
+  -F "file=@./data/assets/clipA.mp4"
+
+curl -X POST http://localhost:8080/api/projects/project-1/assets/asset-1
+# (Replace asset-1 with the id returned from the upload.)
 
 curl -X POST http://localhost:8080/api/projects/project-1/feeds \
   -H "Content-Type: application/json" \
-  -d '{"projectId":"project-1","id":"feed-1","name":"Clip A","type":"VideoFile","configJson":{"filePath":"data/assets/clipA.mp4"}}'
+  -d '{"projectId":"project-1","id":"feed-1","name":"Clip A","assetId":"asset-1","settings":{"variantPath":"","monochrome":false,"panDirection":"leftToRight","panDurationSeconds":120,"visiblePortion":0.6}}'
 
 curl http://localhost:8080/api/projects/project-1/feeds
 
@@ -347,13 +397,18 @@ Follow this minimal recipe to see the full end-to-end chain (server + renderer +
      ```bash
      # Create a project to scope all feeds/scenes/cues
      curl -X POST http://localhost:8080/api/projects -H "Content-Type: application/json" \
-       -d '{"id":"project-1","name":"Demo Project","description":"","cueOrder":[],"settings":{"controllers":{},"midiChannels":[],"globalConfig":{}}}'
+       -d '{"id":"project-1","name":"Demo Project","description":"","createdAt":"2026-02-02T10:00:00Z","updatedAt":"2026-02-02T10:00:00Z","assetIds":[],"sceneIds":[],"feedIds":[],"cueOrder":[],"settings":{"controllers":{},"midiChannels":[],"globalConfig":{}}}'
 
-     # Create two VideoFile feeds pointing at the prepared assets
+     # Upload two assets and associate them with the project
+     curl -X POST http://localhost:8080/api/projects/project-1/assets -F "file=@./data/assets/clipA.mp4"
+     curl -X POST http://localhost:8080/api/projects/project-1/assets -F "file=@./data/assets/clipB.mp4"
+     # (Use the returned asset IDs in the feed payloads below.)
+
+     # Create two VideoFile feeds that reference the uploaded asset IDs
      curl -X POST http://localhost:8080/api/projects/project-1/feeds -H "Content-Type: application/json" \
-       -d '{"projectId":"project-1","id":"1","name":"Clip A","type":"VideoFile","configJson":{"filePath":"data/assets/clipA.mp4"}}'
+       -d '{"projectId":"project-1","id":"1","name":"Clip A","assetId":"asset-1","settings":{"variantPath":"","monochrome":false,"panDirection":"leftToRight","panDurationSeconds":120,"visiblePortion":0.6}}'
      curl -X POST http://localhost:8080/api/projects/project-1/feeds -H "Content-Type: application/json" \
-       -d '{"projectId":"project-1","id":"2","name":"Clip B","type":"VideoFile","configJson":{"filePath":"data/assets/clipB.mp4"}}'
+       -d '{"projectId":"project-1","id":"2","name":"Clip B","assetId":"asset-2","settings":{"variantPath":"","monochrome":false,"panDirection":"leftToRight","panDurationSeconds":120,"visiblePortion":0.6}}'
 
      # Create a scene with two surfaces that reference the feeds and include quad vertices
      curl -X POST http://localhost:8080/api/projects/project-1/scenes -H "Content-Type: application/json" \
@@ -361,19 +416,6 @@ Follow this minimal recipe to see the full end-to-end chain (server + renderer +
 
      # Send the full Scene + Feeds payload to the renderer
      curl -X POST http://localhost:8080/api/projects/project-1/renderer/loadScene -H "Content-Type: application/json" -d '{"sceneId":"1"}'
-     ```
-     (`configJson` accepts either a JSON string or an inline JSON object; it is stored as a serialized string internally.)
-
-   - **Demo helper endpoint** (auto-creates feeds/surfaces/scene and sends LoadSceneDefinition):
-     ```bash
-     curl -X POST http://localhost:8080/api/demo/two-video-test -d ''
-     ```
-     The JSON response includes the created project, feed, and scene IDs.
-     Note: cpp-httplib requires a `Content-Length` header for POST; `-d ''` adds an explicit empty body.
-
-     To clear demo projects:
-     ```bash
-     curl -X POST http://localhost:8080/api/demo/clear-projects -d ''
      ```
 
 6. **Verbose logging (optional)**

@@ -2,6 +2,7 @@
 #include "db/SchemaMigrations.h"
 #include "db/SqliteConnection.h"
 #include "http/HttpServer.h"
+#include "repo/AssetRepository.h"
 #include "repo/FeedRepository.h"
 #include "repo/SceneRepository.h"
 #include "repo/CueRepository.h"
@@ -63,6 +64,7 @@ void writeFile(const std::filesystem::path& path, const std::string& contents) {
 
 struct TestServerContext {
     db::SqliteConnection connection;
+    repo::AssetRepository assetRepo;
     repo::FeedRepository feedRepo;
     repo::SceneRepository sceneRepo;
     repo::CueRepository cueRepo;
@@ -70,11 +72,12 @@ struct TestServerContext {
     http::HttpServer httpServer;
 
     explicit TestServerContext(const std::string& dbPath, std::string webRoot = "")
-        : feedRepo(connection),
+        : assetRepo(connection),
+          feedRepo(connection),
           sceneRepo(connection),
           cueRepo(connection),
           projectRepo(connection),
-          httpServer(feedRepo, sceneRepo, cueRepo, projectRepo, nullptr, true, std::move(webRoot)) {
+          httpServer(assetRepo, feedRepo, sceneRepo, cueRepo, projectRepo, nullptr, true, std::move(webRoot)) {
         connection.open(dbPath);
         db::SchemaMigrations::applyMigrations(connection);
     }
@@ -132,12 +135,12 @@ bool waitForServer(httplib::Client& client, http::HttpServer& server, const Serv
     return false;
 }
 
-std::string feedBody(const std::string& projectId) {
+std::string feedBody(const std::string& projectId, const std::string& assetId) {
     nlohmann::json feed{{"projectId", projectId},
                         {"id", "1"},
-                        {"name", "Camera"},
-                        {"type", "Camera"},
-                        {"configJson", "{}"}};
+                        {"name", "Feed"},
+                        {"assetId", assetId},
+                        {"settings", nlohmann::json::object()}};
     return feed.dump();
 }
 
@@ -180,6 +183,9 @@ std::string cueBody(const std::string& projectId, const std::string& cueId, cons
 }
 
 std::string projectBody(const std::string& projectId, const std::vector<std::string>& cueOrder,
+                        const std::vector<std::string>& assetIds = {},
+                        const std::vector<std::string>& sceneIds = {},
+                        const std::vector<std::string>& feedIds = {},
                         nlohmann::json settings = nlohmann::json::object()) {
     auto normalizedSettings = settings.empty() ? nlohmann::json::object() : settings;
     if (!normalizedSettings.contains("globalConfig") || normalizedSettings["globalConfig"].is_null()) {
@@ -188,6 +194,11 @@ std::string projectBody(const std::string& projectId, const std::vector<std::str
     nlohmann::json project{{"id", projectId},
                            {"name", "ProjectName"},
                            {"description", "Project description"},
+                           {"createdAt", "2026-02-02T10:00:00Z"},
+                           {"updatedAt", "2026-02-02T10:00:00Z"},
+                           {"assetIds", assetIds},
+                           {"sceneIds", sceneIds},
+                           {"feedIds", feedIds},
                            {"cueOrder", cueOrder},
                            {"settings", normalizedSettings}};
     return project.dump();
@@ -200,6 +211,19 @@ void createProject(httplib::Client& client, const std::string& projectId) {
         throw std::runtime_error("Project create failed with status " + std::to_string(res->status) +
                                  " body: " + res->body);
     }
+}
+
+std::string seedAssetForProject(TestServerContext& ctx, const std::string& projectId) {
+    auto asset = ctx.assetRepo.createAsset(core::Asset{core::AssetId{}, "Asset", core::AssetType::VideoFile,
+                                                       "/media/test.mp4"});
+    ctx.assetRepo.addAssetToProject(core::ProjectId{projectId}, asset.getId());
+    auto project = ctx.projectRepo.findProjectById(core::ProjectId{projectId});
+    if (project.has_value()) {
+        project->getAssetIds().push_back(asset.getId());
+        project->setUpdatedAt("2026-02-02T10:00:00Z");
+        ctx.projectRepo.updateProject(*project);
+    }
+    return asset.getId().value;
 }
 
 }  // namespace
@@ -215,9 +239,10 @@ TEST_CASE("HTTP API can create and list feeds", "[http][integration]") {
 
     const std::string projectId = "project-1";
     createProject(*client, projectId);
+    const auto assetId = seedAssetForProject(ctx, projectId);
 
     auto postRes = client->Post(("/api/projects/" + projectId + "/feeds").c_str(),
-                                feedBody(projectId), "application/json");
+                                feedBody(projectId, assetId), "application/json");
     REQUIRE(postRes != nullptr);
     if (postRes->status != 201) {
         throw std::runtime_error("Feed POST failed with status " + std::to_string(postRes->status) +
@@ -279,7 +304,8 @@ TEST_CASE("HTTP API can create, fetch, update, and delete projects", "[http][int
 
     const std::string projectId = "project-1";
     createProject(*client, projectId);
-    REQUIRE(client->Post(("/api/projects/" + projectId + "/feeds").c_str(), feedBody(projectId),
+    const auto assetId = seedAssetForProject(ctx, projectId);
+    REQUIRE(client->Post(("/api/projects/" + projectId + "/feeds").c_str(), feedBody(projectId, assetId),
                          "application/json")->status == 201);
     REQUIRE(client->Post(("/api/projects/" + projectId + "/scenes").c_str(),
                          sceneWithSurfaceBody(projectId, "scene-1", "1"), "application/json")->status == 201);
@@ -287,7 +313,7 @@ TEST_CASE("HTTP API can create, fetch, update, and delete projects", "[http][int
                          cueBody(projectId, "cue-1", "scene-1", "s1"), "application/json")->status == 201);
 
     nlohmann::json settings{{"controllers", {{"fader1", "master"}}}, {"midiChannels", {1, 2}}, {"globalConfig", {}}};
-    auto payload = projectBody(projectId, {"cue-1"}, settings);
+    auto payload = projectBody(projectId, {"cue-1"}, {assetId}, {"scene-1"}, {"1"}, settings);
     auto updateRes = client->Put(("/api/projects/" + projectId).c_str(), payload, "application/json");
     REQUIRE(updateRes != nullptr);
     if (updateRes->status != 200) {
@@ -313,6 +339,11 @@ TEST_CASE("HTTP API can create, fetch, update, and delete projects", "[http][int
     auto updatePayload = nlohmann::json{{"id", "ignored"},
                                         {"name", "ProjectName"},
                                         {"description", "Updated"},
+                                        {"createdAt", "2026-02-02T10:00:00Z"},
+                                        {"updatedAt", "2026-02-02T10:00:00Z"},
+                                        {"assetIds", nlohmann::json::array({assetId})},
+                                        {"sceneIds", nlohmann::json::array({"scene-1"})},
+                                        {"feedIds", nlohmann::json::array({"1"})},
                                         {"cueOrder", nlohmann::json::array({"cue-1"})},
                                         {"settings", updatedSettings}};
     auto updateRes2 = client->Put(("/api/projects/" + projectId).c_str(), updatePayload.dump(), "application/json");
@@ -434,7 +465,8 @@ TEST_CASE("HTTP API prevents deleting feeds referenced by scenes", "[http][integ
 
     const std::string projectId = "project-1";
     createProject(*client, projectId);
-    REQUIRE(client->Post(("/api/projects/" + projectId + "/feeds").c_str(), feedBody(projectId),
+    const auto assetId = seedAssetForProject(ctx, projectId);
+    REQUIRE(client->Post(("/api/projects/" + projectId + "/feeds").c_str(), feedBody(projectId, assetId),
                          "application/json")->status == 201);
     REQUIRE(client->Post(("/api/projects/" + projectId + "/scenes").c_str(),
                          sceneWithSurfaceBody(projectId, "scene-guard", "1"), "application/json")->status == 201);
@@ -457,7 +489,8 @@ TEST_CASE("HTTP API prevents deleting scenes referenced by cues", "[http][integr
 
     const std::string projectId = "project-1";
     createProject(*client, projectId);
-    REQUIRE(client->Post(("/api/projects/" + projectId + "/feeds").c_str(), feedBody(projectId),
+    const auto assetId = seedAssetForProject(ctx, projectId);
+    REQUIRE(client->Post(("/api/projects/" + projectId + "/feeds").c_str(), feedBody(projectId, assetId),
                          "application/json")->status == 201);
     REQUIRE(client->Post(("/api/projects/" + projectId + "/scenes").c_str(),
                          sceneWithSurfaceBody(projectId, "scene-guard", "1"), "application/json")->status == 201);
@@ -485,7 +518,8 @@ TEST_CASE("HTTP API supports cue CRUD", "[http][integration]") {
 
     const std::string projectId = "project-1";
     createProject(*client, projectId);
-    REQUIRE(client->Post(("/api/projects/" + projectId + "/feeds").c_str(), feedBody(projectId),
+    const auto assetId = seedAssetForProject(ctx, projectId);
+    REQUIRE(client->Post(("/api/projects/" + projectId + "/feeds").c_str(), feedBody(projectId, assetId),
                          "application/json")->status == 201);
     REQUIRE(client->Post(("/api/projects/" + projectId + "/scenes").c_str(),
                          sceneWithSurfaceBody(projectId, "scene-1", "1"), "application/json")->status == 201);
@@ -529,14 +563,16 @@ TEST_CASE("HTTP API prevents deleting cues referenced by projects", "[http][inte
 
     const std::string projectId = "project-guard";
     createProject(*client, projectId);
-    REQUIRE(client->Post(("/api/projects/" + projectId + "/feeds").c_str(), feedBody(projectId),
+    const auto assetId = seedAssetForProject(ctx, projectId);
+    REQUIRE(client->Post(("/api/projects/" + projectId + "/feeds").c_str(), feedBody(projectId, assetId),
                          "application/json")->status == 201);
     REQUIRE(client->Post(("/api/projects/" + projectId + "/scenes").c_str(),
                          sceneWithSurfaceBody(projectId, "scene-1", "1"), "application/json")->status == 201);
     REQUIRE(client->Post(("/api/projects/" + projectId + "/cues").c_str(),
                          cueBody(projectId, "cue-guard", "scene-1", "s1"), "application/json")->status == 201);
     REQUIRE(client->Put(("/api/projects/" + projectId).c_str(),
-                        projectBody(projectId, {"cue-guard"}), "application/json")->status == 200);
+                        projectBody(projectId, {"cue-guard"}, {assetId}, {"scene-1"}, {"1"}), "application/json")
+                ->status == 200);
 
     auto deleteRes = client->Delete(("/api/projects/" + projectId + "/cues/cue-guard").c_str());
     REQUIRE(deleteRes != nullptr);
@@ -556,8 +592,9 @@ TEST_CASE("HTTP API supports /api prefix", "[http][integration][api-prefix]") {
 
     const std::string projectId = "project-1";
     createProject(*client, projectId);
+    const auto assetId = seedAssetForProject(ctx, projectId);
 
-    auto createRes = client->Post(("/api/projects/" + projectId + "/feeds").c_str(), feedBody(projectId),
+    auto createRes = client->Post(("/api/projects/" + projectId + "/feeds").c_str(), feedBody(projectId, assetId),
                                   "application/json");
     REQUIRE(createRes != nullptr);
     REQUIRE(createRes->status == 201);

@@ -64,7 +64,9 @@ describe("AssetBrowser", () => {
 
   it("deletes selected asset after confirmation", async () => {
     const store = useAssetStore();
-    store.assets = [{ id: "clip.mp4", name: "clip.mp4", path: "/data/clip.mp4", type: "video" }];
+    store.assets = [
+      { id: "clip.mp4", name: "clip.mp4", path: "/data/clip.mp4", type: "VideoFile", variants: [] },
+    ];
     store.activeAsset = store.assets[0];
     const deleteSpy = vi.spyOn(store, "deleteAsset").mockResolvedValue();
 

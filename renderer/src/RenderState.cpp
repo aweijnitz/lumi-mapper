@@ -1,40 +1,75 @@
 #include "RenderState.h"
 
 #include <iostream>
-#include <projection/core/Feed.h>
+#include <unordered_map>
 
+using projection::core::Asset;
+using projection::core::AssetType;
 using projection::core::Feed;
-using projection::core::FeedType;
-using projection::core::ImageFileConfig;
 using projection::core::Scene;
-using projection::core::VideoFileConfig;
-using projection::core::parseImageFileConfig;
-using projection::core::parseVideoFileConfig;
 
 namespace projection::renderer {
+namespace {
 
-std::unordered_map<std::string, std::string> mapVideoFeedFilePaths(const Scene& /*scene*/,
-                                                                   const std::vector<Feed>& feeds) {
-  std::unordered_map<std::string, std::string> mapping;
-  for (const auto& feed : feeds) {
-    if (feed.getType() != FeedType::VideoFile) {
-      continue;
-    }
-    VideoFileConfig config = parseVideoFileConfig(feed);
-    mapping.emplace(feed.getId().value, config.filePath);
+std::unordered_map<std::string, Asset> mapAssetsById(const std::vector<Asset>& assets) {
+  std::unordered_map<std::string, Asset> mapping;
+  mapping.reserve(assets.size());
+  for (const auto& asset : assets) {
+    mapping.emplace(asset.getId().value, asset);
   }
   return mapping;
 }
 
-void RenderState::loadSceneDefinition(const Scene& scene, const std::vector<Feed>& feeds) {
+std::string resolveAssetPath(const Feed& feed, const Asset& asset) {
+  const auto& variantPath = feed.getSettings().variantPath;
+  if (!variantPath.empty()) {
+    return variantPath;
+  }
+  return asset.getPath();
+}
+
+}  // namespace
+
+std::unordered_map<std::string, std::string> mapVideoFeedFilePaths(const Scene& /*scene*/,
+                                                                   const std::vector<Feed>& feeds,
+                                                                   const std::vector<Asset>& assets) {
+  std::unordered_map<std::string, std::string> mapping;
+  auto assetMap = mapAssetsById(assets);
+  for (const auto& feed : feeds) {
+    auto assetIt = assetMap.find(feed.getAssetId().value);
+    if (assetIt == assetMap.end()) {
+      continue;
+    }
+    if (assetIt->second.getType() != AssetType::VideoFile) {
+      continue;
+    }
+    mapping.emplace(feed.getId().value, resolveAssetPath(feed, assetIt->second));
+  }
+  return mapping;
+}
+
+void RenderState::loadSceneDefinition(const Scene& scene, const std::vector<Feed>& feeds,
+                                      const std::vector<Asset>& assets) {
   currentScene_ = scene;
   currentFeeds_ = feeds;
+  currentAssets_ = assets;
   videoFeeds_.clear();
   imageFeeds_.clear();
 
-  auto mapping = mapVideoFeedFilePaths(scene, feeds);
+  auto assetMap = mapAssetsById(assets);
+  auto mapping = mapVideoFeedFilePaths(scene, feeds, assets);
+
   for (const auto& feed : feeds) {
-    if (feed.getType() == FeedType::VideoFile) {
+    auto assetIt = assetMap.find(feed.getAssetId().value);
+    if (assetIt == assetMap.end()) {
+      std::cerr << "[RenderState] Missing asset for feed " << feed.getId().value << std::endl;
+      continue;
+    }
+
+    const auto& asset = assetIt->second;
+    const auto resolvedPath = resolveAssetPath(feed, asset);
+
+    if (asset.getType() == AssetType::VideoFile) {
       auto it = mapping.find(feed.getId().value);
       if (it == mapping.end()) {
         continue;
@@ -49,33 +84,25 @@ void RenderState::loadSceneDefinition(const Scene& scene, const std::vector<Feed
       resource.filePath = it->second;
 
       videoFeeds_.emplace(feed.getId().value, std::move(resource));
-    } else if (feed.getType() == FeedType::ImageFile) {
-      try {
-        ImageFileConfig config = parseImageFileConfig(feed);
-        std::cerr << "[RenderState] Loading image feed: " << feed.getId().value
-                  << " path=" << config.filePath << std::endl;
+    } else if (asset.getType() == AssetType::ImageFile) {
+      std::cerr << "[RenderState] Loading image feed: " << feed.getId().value
+                << " path=" << resolvedPath << std::endl;
 
-        ImageFeedResource resource;
-        resource.id = feed.getId();
-        resource.filePath = config.filePath;
-        resource.panDirection = config.panDirection;
-        resource.panDurationSeconds = config.panDurationSeconds;
-        resource.visiblePortion = config.visiblePortion;
-        resource.panStartTime = ofGetElapsedTimef();  // Start pan animation from now
-        resource.pingPongReverse = false;
+      ImageFeedResource resource;
+      resource.id = feed.getId();
+      resource.filePath = resolvedPath;
+      resource.panDirection = feed.getSettings().panDirection;
+      resource.panDurationSeconds = feed.getSettings().panDurationSeconds;
+      resource.visiblePortion = feed.getSettings().visiblePortion;
+      resource.panStartTime = ofGetElapsedTimef();
+      resource.pingPongReverse = false;
 
-        if (resource.image.load(config.filePath)) {
-          std::cerr << "[RenderState] Image loaded successfully: " << config.filePath
-                    << " (" << resource.image.getWidth() << "x" << resource.image.getHeight() << ")" << std::endl;
-          imageFeeds_.emplace(feed.getId().value, std::move(resource));
-        } else {
-          std::cerr << "[RenderState] Failed to load image: " << config.filePath << std::endl;
-        }
-      } catch (const std::exception& ex) {
-        std::cerr << "[RenderState] Error loading image feed " << feed.getId().value
-                  << ": " << ex.what() << std::endl;
-      } catch (...) {
-        std::cerr << "[RenderState] Unknown error loading image feed " << feed.getId().value << std::endl;
+      if (resource.image.load(resolvedPath)) {
+        std::cerr << "[RenderState] Image loaded successfully: " << resolvedPath
+                  << " (" << resource.image.getWidth() << "x" << resource.image.getHeight() << ")" << std::endl;
+        imageFeeds_.emplace(feed.getId().value, std::move(resource));
+      } else {
+        std::cerr << "[RenderState] Failed to load image: " << resolvedPath << std::endl;
       }
     }
   }
@@ -88,3 +115,4 @@ void RenderState::updateVideoPlayers() {
 }
 
 }  // namespace projection::renderer
+

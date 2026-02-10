@@ -1,6 +1,9 @@
 #pragma once
 
+#include <atomic>
+#include <condition_variable>
 #include <memory>
+#include <mutex>
 #include <string>
 
 #include "repo/CueRepository.h"
@@ -10,6 +13,7 @@ class SqliteConnection;
 }
 
 namespace projection::server::repo {
+class AssetRepository;
 class FeedRepository;
 class SceneRepository;
 class CueRepository;
@@ -45,7 +49,11 @@ public:
 
 private:
     ServerConfig config_;
+    std::atomic<bool> stopRequested_{false};
+    std::mutex stopMutex_;
+    std::condition_variable stopCv_;
     std::unique_ptr<db::SqliteConnection> connection_;
+    std::unique_ptr<repo::AssetRepository> assetRepository_;
     std::unique_ptr<repo::FeedRepository> feedRepository_;
     std::unique_ptr<repo::SceneRepository> sceneRepository_;
     std::unique_ptr<repo::CueRepository> cueRepository_;

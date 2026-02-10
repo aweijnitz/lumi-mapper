@@ -118,7 +118,7 @@ Notable tests:
 
 - Use `OPENFRAMEWORKS_DIR` and `OPENFRAMEWORKS_PLATFORM` to point CMake at your local OF installation.
 - When editing message handling, update tests under `renderer/tests` that simulate server messages.
-- Video feeds are loaded from the file path extracted from `Feed`'s VideoFile config (see `RenderState::mapVideoFeedFilePaths`). Ensure feed `configJson` contains a valid `filePath` for `VideoFile` feed types.
+- Video feeds are loaded from the file path resolved from the referenced `Asset` (see `RenderState::mapVideoFeedFilePaths`). Ensure the feed's `assetId` points at a `VideoFile` asset and the asset path is accessible to the renderer.
 - The rendering pipeline uses textured meshes to map feed pixels to transformed surface geometry — see `ofApp::draw()`.
 
 ---

@@ -1,6 +1,8 @@
 #include "db/SchemaMigrations.h"
 #include "db/SqliteConnection.h"
 #include "http/HttpServer.h"
+#include "projection/core/Asset.h"
+#include "repo/AssetRepository.h"
 #include "repo/FeedRepository.h"
 #include "repo/SceneRepository.h"
 #include "repo/CueRepository.h"
@@ -20,10 +22,12 @@
 using projection::server::db::SchemaMigrations;
 using projection::server::db::SqliteConnection;
 using projection::server::http::HttpServer;
+using projection::server::repo::AssetRepository;
 using projection::server::repo::FeedRepository;
 using projection::server::repo::SceneRepository;
 using projection::server::repo::CueRepository;
 using projection::server::repo::ProjectRepository;
+namespace core = projection::core;
 
 namespace {
 
@@ -49,6 +53,7 @@ std::string tempDb(const std::string& name) { return (std::filesystem::temp_dire
 
 struct TestServerContext {
     SqliteConnection connection;
+    AssetRepository assetRepo;
     FeedRepository feedRepo;
     SceneRepository sceneRepo;
     CueRepository cueRepo;
@@ -56,11 +61,12 @@ struct TestServerContext {
     HttpServer httpServer;
 
     explicit TestServerContext(const std::string& dbPath)
-        : feedRepo(connection),
+        : assetRepo(connection),
+          feedRepo(connection),
           sceneRepo(connection),
           cueRepo(connection),
           projectRepo(connection),
-          httpServer(feedRepo, sceneRepo, cueRepo, projectRepo, nullptr) {
+          httpServer(assetRepo, feedRepo, sceneRepo, cueRepo, projectRepo, nullptr) {
         connection.open(dbPath);
         SchemaMigrations::applyMigrations(connection);
     }
@@ -131,13 +137,12 @@ nlohmann::json surfaceJson(const std::string& id, const std::string& feedId, int
                           {"zOrder", zOrder}};
 }
 
-nlohmann::json feedJson(const std::string& projectId, const std::string& id, const std::string& filePath) {
-    nlohmann::json config{{"filePath", filePath}};
+nlohmann::json feedJson(const std::string& projectId, const std::string& id, const std::string& assetId) {
     return nlohmann::json{{"projectId", projectId},
                           {"id", id},
                           {"name", "Feed" + id},
-                          {"type", "VideoFile"},
-                          {"configJson", config.dump()}};
+                          {"assetId", assetId},
+                          {"settings", nlohmann::json::object()}};
 }
 
 }  // namespace
@@ -155,18 +160,35 @@ TEST_CASE("HTTP scenes endpoint persists and returns surfaces", "[http][scenes]"
     REQUIRE(client->Post("/api/projects", nlohmann::json{{"id", projectId},
                                                          {"name", "Project"},
                                                          {"description", ""},
+                                                         {"createdAt", "2026-02-02T10:00:00Z"},
+                                                         {"updatedAt", "2026-02-02T10:00:00Z"},
+                                                         {"assetIds", nlohmann::json::array()},
+                                                         {"sceneIds", nlohmann::json::array()},
+                                                         {"feedIds", nlohmann::json::array()},
                                                          {"cueOrder", nlohmann::json::array()},
                                                          {"settings", nlohmann::json::object()}}
                                                          .dump(),
                          "application/json")
                 ->status == 201);
 
+    auto assetA =
+        ctx.assetRepo.createAsset(core::Asset{core::AssetId{}, "A", core::AssetType::VideoFile, "/videos/a.mp4"});
+    auto assetB =
+        ctx.assetRepo.createAsset(core::Asset{core::AssetId{}, "B", core::AssetType::VideoFile, "/videos/b.mp4"});
+    ctx.assetRepo.addAssetToProject(core::ProjectId{projectId}, assetA.getId());
+    ctx.assetRepo.addAssetToProject(core::ProjectId{projectId}, assetB.getId());
+    auto project = ctx.projectRepo.findProjectById(core::ProjectId{projectId});
+    REQUIRE(project.has_value());
+    project->getAssetIds() = {assetA.getId(), assetB.getId()};
+    project->setUpdatedAt("2026-02-02T10:00:00Z");
+    ctx.projectRepo.updateProject(*project);
+
     auto feed1 = client->Post(("/api/projects/" + projectId + "/feeds").c_str(),
-                              feedJson(projectId, "1", "/videos/a.mp4").dump(), "application/json");
+                              feedJson(projectId, "1", assetA.getId().value).dump(), "application/json");
     REQUIRE(feed1 != nullptr);
     REQUIRE(feed1->status == 201);
     auto feed2 = client->Post(("/api/projects/" + projectId + "/feeds").c_str(),
-                              feedJson(projectId, "2", "/videos/b.mp4").dump(), "application/json");
+                              feedJson(projectId, "2", assetB.getId().value).dump(), "application/json");
     REQUIRE(feed2 != nullptr);
     REQUIRE(feed2->status == 201);
 
@@ -206,14 +228,28 @@ TEST_CASE("HTTP scenes endpoint validates feed references", "[http][scenes][vali
     REQUIRE(client->Post("/api/projects", nlohmann::json{{"id", projectId},
                                                          {"name", "Project"},
                                                          {"description", ""},
+                                                         {"createdAt", "2026-02-02T10:00:00Z"},
+                                                         {"updatedAt", "2026-02-02T10:00:00Z"},
+                                                         {"assetIds", nlohmann::json::array()},
+                                                         {"sceneIds", nlohmann::json::array()},
+                                                         {"feedIds", nlohmann::json::array()},
                                                          {"cueOrder", nlohmann::json::array()},
                                                          {"settings", nlohmann::json::object()}}
                                                          .dump(),
                          "application/json")
                 ->status == 201);
 
+    auto asset =
+        ctx.assetRepo.createAsset(core::Asset{core::AssetId{}, "A", core::AssetType::VideoFile, "/videos/a.mp4"});
+    ctx.assetRepo.addAssetToProject(core::ProjectId{projectId}, asset.getId());
+    auto project = ctx.projectRepo.findProjectById(core::ProjectId{projectId});
+    REQUIRE(project.has_value());
+    project->getAssetIds() = {asset.getId()};
+    project->setUpdatedAt("2026-02-02T10:00:00Z");
+    ctx.projectRepo.updateProject(*project);
+
     auto feed1 = client->Post(("/api/projects/" + projectId + "/feeds").c_str(),
-                              feedJson(projectId, "1", "/videos/a.mp4").dump(), "application/json");
+                              feedJson(projectId, "1", asset.getId().value).dump(), "application/json");
     REQUIRE(feed1 != nullptr);
     REQUIRE(feed1->status == 201);
 

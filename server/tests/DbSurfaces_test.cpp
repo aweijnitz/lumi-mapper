@@ -28,33 +28,43 @@ TEST_CASE("SchemaMigrations creates surfaces table", "[db][migrations][surfaces]
 
     char* errorMessage = nullptr;
     int result = sqlite3_exec(handle,
-                              "INSERT INTO projects(id, name, description, settings_json) "
-                              "VALUES('proj-1', 'Project', 'desc', '{}');",
+                              "INSERT INTO projects(id, name, description, created_at, updated_at, asset_ids_json, "
+                              "scene_ids_json, feed_ids_json, cue_order_json, settings_json) "
+                              "VALUES('proj-1', 'Project', 'desc', '2026-02-02T10:00:00Z', "
+                              "'2026-02-02T10:00:00Z', '[]', '[]', '[]', '[]', '{}');",
                               nullptr, nullptr, &errorMessage);
     sqlite3_free(errorMessage);
     REQUIRE(result == SQLITE_OK);
 
     result = sqlite3_exec(handle,
-                          "INSERT INTO feeds(project_id, id, name, type, config_json) "
-                          "VALUES('proj-1', 'f1', 'Feed', 'VideoFile', '{}');",
+                          "INSERT INTO assets(id, name, type, path, variants_json) "
+                          "VALUES('asset-1', 'Feed', 'VideoFile', '/media/a.mp4', '[]');",
                           nullptr, nullptr, &errorMessage);
     sqlite3_free(errorMessage);
     REQUIRE(result == SQLITE_OK);
 
     result = sqlite3_exec(handle,
-                          "INSERT INTO scenes(project_id, id, name, description) "
-                          "VALUES('proj-1', 'scene-1', 'Scene', 'desc');",
+                          "INSERT INTO feeds(project_id, id, name, asset_id, settings_json) "
+                          "VALUES('proj-1', 'f1', 'Feed', 'asset-1', '{}');",
+                          nullptr, nullptr, &errorMessage);
+    sqlite3_free(errorMessage);
+    REQUIRE(result == SQLITE_OK);
+
+    result = sqlite3_exec(handle,
+                          "INSERT INTO scenes(project_id, id, name, description, settings_json) "
+                          "VALUES('proj-1', 'scene-1', 'Scene', 'desc', '{}');",
                           nullptr, nullptr, &errorMessage);
     sqlite3_free(errorMessage);
     REQUIRE(result == SQLITE_OK);
 
     result = sqlite3_exec(handle,
                           "INSERT INTO surfaces(project_id, id, scene_id, name, feed_id, z_order, opacity, brightness, "
-                          "blend_mode, vertices_json) VALUES('proj-1', 's1', 'scene-1', 'Surf', 'f1', 0, 1.0, 1.0, "
-                          "'Normal', '[]');",
+                          "blend_mode, vertices_json, rotation) VALUES('proj-1', 's1', 'scene-1', 'Surf', 'f1', 0, "
+                          "1.0, 1.0, 'Normal', '[]', 0);",
                           nullptr, nullptr, &errorMessage);
     std::string errorStr = errorMessage ? errorMessage : "";
     sqlite3_free(errorMessage);
 
     REQUIRE(result == SQLITE_OK);
 }
+

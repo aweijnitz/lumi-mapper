@@ -8,12 +8,14 @@ import Message from "primevue/message";
 import Button from "primevue/button";
 import { useSceneStore } from "../../stores/sceneStore";
 import { useFeedStore } from "../../stores/feedStore";
+import { useAssetStore } from "../../stores/assetStore";
 import { useRendererStore } from "../../stores/rendererStore";
 import type { Surface, EllipseSurface } from "../../types/surface";
 import { isEllipseSurface } from "../../types/surface";
 
 const sceneStore = useSceneStore();
 const feedStore = useFeedStore();
+const assetStore = useAssetStore();
 const rendererStore = useRendererStore();
 const { activeScene, activeSurfaceId, error } = storeToRefs(sceneStore);
 
@@ -38,8 +40,13 @@ const form = reactive({
 // Check if active surface is an ellipse
 const isEllipse = computed(() => activeSurface.value && isEllipseSurface(activeSurface.value));
 
+const assetById = computed(() => new Map(assetStore.assets.map((asset) => [asset.id, asset])));
 const feedOptions = computed(() =>
-  feedStore.feeds.map((feed) => ({ label: feed.name, value: feed.id, type: feed.type })),
+  feedStore.feeds.map((feed) => ({
+    label: feed.name,
+    value: feed.id,
+    type: assetById.value.get(feed.assetId)?.type ?? "VideoFile",
+  })),
 );
 
 const blendOptions: Surface["blendMode"][] = ["Normal", "Additive", "Multiply"];

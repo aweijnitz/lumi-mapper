@@ -6,6 +6,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "projection/core/Asset.h"
 #include "projection/core/Ids.h"
 #include "projection/core/Scene.h"
 #include "projection/core/Feed.h"
@@ -78,9 +79,10 @@ struct LoadSceneMessage {
 struct LoadSceneDefinitionMessage {
   Scene scene;
   std::vector<Feed> feeds;
+  std::vector<Asset> assets;
 
   bool operator==(const LoadSceneDefinitionMessage& other) const {
-    return scene == other.scene && feeds == other.feeds;
+    return scene == other.scene && feeds == other.feeds && assets == other.assets;
   }
 };
 

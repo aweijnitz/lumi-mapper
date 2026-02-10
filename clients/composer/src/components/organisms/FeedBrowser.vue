@@ -11,7 +11,8 @@ import { useProjectStore } from "../../stores/projectStore";
 import { useFeedStore } from "../../stores/feedStore";
 import { useAssetStore } from "../../stores/assetStore";
 import { createId } from "../../composables/useIds";
-import type { Feed, FeedType } from "../../types/feed";
+import type { Feed } from "../../types/feed";
+import { defaultFeedSettings } from "../../types/feed";
 
 const projectStore = useProjectStore();
 const feedStore = useFeedStore();
@@ -19,19 +20,16 @@ const assetStore = useAssetStore();
 const { feeds, activeFeed, error } = storeToRefs(feedStore);
 
 const name = ref("");
-const selectedAssetPath = ref("");
+const selectedAssetId = ref("");
 const successMessage = ref("");
 
-// Determine feed type based on selected asset
-const selectedFeedType = computed<FeedType>(() => {
-  const asset = assetStore.assets.find(a => a.path === selectedAssetPath.value);
-  return asset?.type === "image" ? "ImageFile" : "VideoFile";
-});
+const assetById = computed(() => new Map(assetStore.assets.map((asset) => [asset.id, asset])));
+const selectedAssetType = computed(() => assetById.value.get(selectedAssetId.value)?.type ?? "VideoFile");
 
 const assetOptions = computed(() =>
   assetStore.assets.map((asset) => ({
     label: asset.name,
-    value: asset.path,
+    value: asset.id,
     type: asset.type,
   })),
 );
@@ -42,33 +40,23 @@ const canCreate = computed(
   () =>
     hasActiveProject.value &&
     name.value.trim().length > 0 &&
-    selectedAssetPath.value.trim().length > 0 &&
+    selectedAssetId.value.trim().length > 0 &&
     !isBusy.value,
 );
 const canUpdate = computed(() => Boolean(activeFeed.value && canCreate.value));
 
-const resolveFeedFilePath = (feed: Feed | null) => {
-  if (!feed) {
-    return "";
-  }
-  const config = feed.configJson;
-  if (typeof config === "string") {
-    try {
-      const parsed = JSON.parse(config) as { filePath?: string };
-      return parsed.filePath ?? "";
-    } catch {
-      return "";
-    }
-  }
-  if (config && typeof config === "object" && "filePath" in config) {
-    return String((config as { filePath?: string }).filePath ?? "");
-  }
-  return "";
+const getAssetPathForFeed = (feed: Feed) => {
+  const asset = assetById.value.get(feed.assetId);
+  return asset?.path ?? "";
 };
 
-// Extract just the filename from a full path
+const getAssetTypeForFeed = (feed: Feed) => {
+  const asset = assetById.value.get(feed.assetId);
+  return asset?.type ?? "VideoFile";
+};
+
 const getFileName = (feed: Feed) => {
-  const path = resolveFeedFilePath(feed);
+  const path = getAssetPathForFeed(feed);
   if (!path) return "—";
   const parts = path.split("/");
   return parts[parts.length - 1] || "—";
@@ -77,11 +65,11 @@ const getFileName = (feed: Feed) => {
 const syncFormWithFeed = (feed: Feed | null) => {
   if (!feed) {
     name.value = "";
-    selectedAssetPath.value = "";
+    selectedAssetId.value = "";
     return;
   }
   name.value = feed.name;
-  selectedAssetPath.value = resolveFeedFilePath(feed);
+  selectedAssetId.value = feed.assetId;
 };
 
 watch(
@@ -107,8 +95,8 @@ const buildPayload = (feedId: string): Feed | null => {
     projectId,
     id: feedId,
     name: name.value.trim(),
-    type: selectedFeedType.value,
-    configJson: { filePath: selectedAssetPath.value.trim() },
+    assetId: selectedAssetId.value.trim(),
+    settings: activeFeed.value?.settings ?? defaultFeedSettings,
   };
 };
 
@@ -139,7 +127,6 @@ const updateFeed = async () => {
   if (!payload) {
     return;
   }
-  payload.type = activeFeed.value.type;
   await feedStore.updateFeed(payload);
   if (!feedStore.error) {
     showSuccess("Feed updated");
@@ -184,7 +171,7 @@ const deleteFeed = async () => {
           <label class="feed-browser__label" for="feed-asset" title="Video or image file to use">Source Asset</label>
           <Dropdown
             id="feed-asset"
-            v-model="selectedAssetPath"
+            v-model="selectedAssetId"
             :options="assetOptions"
             optionLabel="label"
             optionValue="value"
@@ -196,7 +183,7 @@ const deleteFeed = async () => {
             <template #value="{ value, placeholder }">
               <template v-if="value">
                 <span class="feed-browser__asset-option">
-                  <i :class="assetOptions.find(a => a.value === value)?.type === 'image' ? 'pi pi-image' : 'pi pi-video'" />
+                  <i :class="assetOptions.find(a => a.value === value)?.type === 'ImageFile' ? 'pi pi-image' : 'pi pi-video'" />
                   {{ assetOptions.find(a => a.value === value)?.label }}
                   <span :class="['feed-browser__asset-type', `feed-browser__asset-type--${assetOptions.find(a => a.value === value)?.type}`]">
                     {{ assetOptions.find(a => a.value === value)?.type }}
@@ -207,7 +194,7 @@ const deleteFeed = async () => {
             </template>
             <template #option="{ option }">
               <span class="feed-browser__asset-option">
-                <i :class="option.type === 'image' ? 'pi pi-image' : 'pi pi-video'" />
+                  <i :class="option.type === 'ImageFile' ? 'pi pi-image' : 'pi pi-video'" />
                 {{ option.label }}
                 <span :class="['feed-browser__asset-type', `feed-browser__asset-type--${option.type}`]">
                   {{ option.type }}
@@ -282,21 +269,24 @@ const deleteFeed = async () => {
           <template #body="{ data }">
             <span class="feed-browser__name" :class="{ 'feed-browser__name--editing': activeFeed?.id === data.id }">
               <i v-if="activeFeed?.id === data.id" class="pi pi-pencil feed-browser__edit-icon"></i>
-              <i :class="data.type === 'ImageFile' ? 'pi pi-image' : 'pi pi-video'" class="feed-browser__type-icon" />
+              <i
+                :class="getAssetTypeForFeed(data) === 'ImageFile' ? 'pi pi-image' : 'pi pi-video'"
+                class="feed-browser__type-icon"
+              />
               {{ data.name }}
             </span>
           </template>
         </Column>
         <Column header="Type">
           <template #body="{ data }">
-            <span :class="['feed-browser__feed-type', `feed-browser__feed-type--${data.type}`]">
-              {{ data.type === 'ImageFile' ? 'Image' : 'Video' }}
+            <span :class="['feed-browser__feed-type', `feed-browser__feed-type--${getAssetTypeForFeed(data)}`]">
+              {{ getAssetTypeForFeed(data) === 'ImageFile' ? 'Image' : 'Video' }}
             </span>
           </template>
         </Column>
         <Column header="Source">
           <template #body="{ data }">
-            <span class="feed-browser__source" :title="resolveFeedFilePath(data)">
+            <span class="feed-browser__source" :title="getAssetPathForFeed(data)">
               {{ getFileName(data) }}
             </span>
           </template>

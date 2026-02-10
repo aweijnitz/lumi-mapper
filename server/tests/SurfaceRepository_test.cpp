@@ -1,9 +1,11 @@
 #include "db/SchemaMigrations.h"
 #include "db/SqliteConnection.h"
+#include "projection/core/Asset.h"
 #include "projection/core/Scene.h"
 #include "projection/core/Surface.h"
 #include "projection/core/Feed.h"
 #include "projection/core/Project.h"
+#include "repo/AssetRepository.h"
 #include "repo/FeedRepository.h"
 #include "repo/ProjectRepository.h"
 #include "repo/SceneRepository.h"
@@ -14,10 +16,12 @@
 #include <cmath>
 #include <vector>
 
+using projection::core::Asset;
+using projection::core::AssetId;
+using projection::core::AssetType;
 using projection::core::BlendMode;
 using projection::core::Feed;
 using projection::core::FeedId;
-using projection::core::FeedType;
 using projection::core::Project;
 using projection::core::ProjectId;
 using projection::core::ProjectSettings;
@@ -28,6 +32,7 @@ using projection::core::SurfaceId;
 using projection::core::Vec2;
 using projection::server::db::SchemaMigrations;
 using projection::server::db::SqliteConnection;
+using projection::server::repo::AssetRepository;
 using projection::server::repo::FeedRepository;
 using projection::server::repo::ProjectRepository;
 using projection::server::repo::SceneRepository;
@@ -48,15 +53,20 @@ TEST_CASE("SurfaceRepository can persist and list surfaces for a scene", "[repo]
     SchemaMigrations::applyMigrations(connection);
 
     ProjectRepository projectRepo(connection);
+    AssetRepository assetRepo(connection);
     FeedRepository feedRepo(connection);
     SceneRepository sceneRepo(connection);
     SurfaceRepository surfaceRepo(connection);
 
-    Project project(ProjectId{"proj-1"}, "Project", "", {}, ProjectSettings{});
+    Project project(ProjectId{"proj-1"}, "Project", "", "2026-02-02T10:00:00Z", "2026-02-02T10:00:00Z", {}, {},
+                    {}, {}, ProjectSettings{});
     project = projectRepo.createProject(project);
 
-    Feed feedA(project.getId(), FeedId{"f1"}, "Feed A", FeedType::VideoFile, "{}");
-    Feed feedB(project.getId(), FeedId{"f2"}, "Feed B", FeedType::VideoFile, "{}");
+    auto assetA = assetRepo.createAsset(Asset{AssetId{}, "A", AssetType::VideoFile, "/media/a.mp4"});
+    auto assetB = assetRepo.createAsset(Asset{AssetId{}, "B", AssetType::VideoFile, "/media/b.mp4"});
+
+    Feed feedA(project.getId(), FeedId{"f1"}, "Feed A", assetA.getId());
+    Feed feedB(project.getId(), FeedId{"f2"}, "Feed B", assetB.getId());
     feedRepo.createFeed(feedA);
     feedRepo.createFeed(feedB);
 
@@ -86,3 +96,4 @@ TEST_CASE("SurfaceRepository can persist and list surfaces for a scene", "[repo]
     REQUIRE(std::fabs(second.getBrightness() - 0.8f) < 0.0001f);
     REQUIRE(second.getBlendMode() == BlendMode::Additive);
 }
+

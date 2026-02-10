@@ -43,10 +43,10 @@ std::string requireString(const json& j, const std::string& key) {
   return value.get<std::string>();
 }
 
-FeedType parseFeedTypeString(const std::string& raw) {
-  FeedType type{};
+AssetType parseAssetTypeString(const std::string& raw) {
+  AssetType type{};
   if (!fromString(raw, type)) {
-    throw std::runtime_error("Invalid FeedType: " + raw);
+    throw std::runtime_error("Invalid AssetType: " + raw);
   }
   return type;
 }
@@ -83,30 +83,30 @@ json surfaceValueArray(const std::map<SurfaceId, float>& values) {
   return arr;
 }
 
-std::vector<CueId> readCueOrder(const json& array) {
+std::vector<std::string> readStringArray(const json& array, const std::string& field) {
   if (!array.is_array()) {
-    throw std::runtime_error("Field 'cueOrder' must be an array");
+    throw std::runtime_error("Field '" + field + "' must be an array");
   }
-  std::vector<CueId> order;
-  order.reserve(array.size());
+  std::vector<std::string> values;
+  values.reserve(array.size());
   for (const auto& entry : array) {
     if (!entry.is_string()) {
-      throw std::runtime_error("Entries in 'cueOrder' must be strings");
+      throw std::runtime_error("Entries in '" + field + "' must be strings");
     }
-    order.emplace_back(entry.get<std::string>());
+    values.emplace_back(entry.get<std::string>());
   }
-  return order;
+  return values;
 }
 
 }  // namespace
 
-void to_json(json& j, const FeedType& type) { j = toString(type); }
+void to_json(json& j, const AssetType& type) { j = toString(type); }
 
-void from_json(const json& j, FeedType& type) {
+void from_json(const json& j, AssetType& type) {
   if (!j.is_string()) {
-    throw std::runtime_error("FeedType must be a string");
+    throw std::runtime_error("AssetType must be a string");
   }
-  type = parseFeedTypeString(j.get<std::string>());
+  type = parseAssetTypeString(j.get<std::string>());
 }
 
 void to_json(json& j, const BlendMode& mode) { j = toString(mode); }
@@ -118,13 +118,82 @@ void from_json(const json& j, BlendMode& mode) {
   mode = parseBlendModeString(j.get<std::string>());
 }
 
-void to_json(json& j, const VideoFileConfig& config) { j = json{{"filePath", config.filePath}}; }
+void to_json(json& j, const AssetVariant& variant) {
+  j = json{{"path", variant.path}, {"note", variant.note}};
+}
 
-void from_json(const json& j, VideoFileConfig& config) {
+void from_json(const json& j, AssetVariant& variant) {
   if (!j.is_object()) {
-    throw std::runtime_error("VideoFileConfig must be an object");
+    throw std::runtime_error("AssetVariant must be an object");
   }
-  config.filePath = requireString(j, "filePath");
+  variant.path = requireString(j, "path");
+  if (j.contains("note") && j["note"].is_string()) {
+    variant.note = j["note"].get<std::string>();
+  } else {
+    variant.note.clear();
+  }
+}
+
+void to_json(json& j, const Asset& asset) {
+  j = json{{"id", asset.getId().value},
+           {"name", asset.getName()},
+           {"type", asset.getType()},
+           {"path", asset.getPath()},
+           {"variants", asset.getVariants()}};
+}
+
+void from_json(const json& j, Asset& asset) {
+  if (!j.is_object()) {
+    throw std::runtime_error("Asset must be an object");
+  }
+  const auto id = requireString(j, "id");
+  const auto name = requireString(j, "name");
+  const auto typeStr = requireString(j, "type");
+  const auto path = requireString(j, "path");
+
+  std::vector<AssetVariant> variants;
+  if (j.contains("variants")) {
+    const auto& variantsJson = j.at("variants");
+    if (!variantsJson.is_array()) {
+      throw std::runtime_error("Field 'variants' must be an array");
+    }
+    variants = variantsJson.get<std::vector<AssetVariant>>();
+  }
+
+  asset = Asset(AssetId{id}, name, parseAssetTypeString(typeStr), path, variants);
+}
+
+void to_json(json& j, const FeedSettings& settings) {
+  j = json{{"variantPath", settings.variantPath},
+           {"monochrome", settings.monochrome},
+           {"panDirection", toString(settings.panDirection)},
+           {"panDurationSeconds", settings.panDurationSeconds},
+           {"visiblePortion", settings.visiblePortion}};
+}
+
+void from_json(const json& j, FeedSettings& settings) {
+  if (!j.is_object()) {
+    throw std::runtime_error("FeedSettings must be an object");
+  }
+  settings = FeedSettings{};
+  if (j.contains("variantPath") && j["variantPath"].is_string()) {
+    settings.variantPath = j["variantPath"].get<std::string>();
+  }
+  if (j.contains("monochrome") && j["monochrome"].is_boolean()) {
+    settings.monochrome = j["monochrome"].get<bool>();
+  }
+  if (j.contains("panDirection") && j["panDirection"].is_string()) {
+    PanDirection dir{};
+    if (fromString(j["panDirection"].get<std::string>(), dir)) {
+      settings.panDirection = dir;
+    }
+  }
+  if (j.contains("panDurationSeconds") && j["panDurationSeconds"].is_number()) {
+    settings.panDurationSeconds = j["panDurationSeconds"].get<float>();
+  }
+  if (j.contains("visiblePortion") && j["visiblePortion"].is_number()) {
+    settings.visiblePortion = j["visiblePortion"].get<float>();
+  }
 }
 
 void to_json(json& j, const Vec2& vec) { j = json{{"x", vec.x}, {"y", vec.y}}; }
@@ -141,8 +210,8 @@ void to_json(json& j, const Feed& feed) {
   j = json{{"projectId", feed.getProjectId().value},
            {"id", feed.getId().value},
            {"name", feed.getName()},
-           {"type", feed.getType()},
-           {"configJson", feed.getConfigJson()}};
+           {"assetId", feed.getAssetId().value},
+           {"settings", feed.getSettings()}};
 }
 
 void from_json(const json& j, Feed& feed) {
@@ -152,19 +221,14 @@ void from_json(const json& j, Feed& feed) {
   const auto projectId = requireString(j, "projectId");
   const auto id = requireString(j, "id");
   const auto name = requireString(j, "name");
-  const auto typeStr = requireString(j, "type");
-  const auto& configField = requireField<json>(j, "configJson");
-  std::string config;
-  if (configField.is_string()) {
-    config = configField.get<std::string>();
-  } else if (configField.is_object() || configField.is_array()) {
-    // Accept a nested JSON object/array and store its serialized form
-    config = configField.dump();
-  } else {
-    throw std::runtime_error("Field 'configJson' must be a string or object");
+  const auto assetId = requireString(j, "assetId");
+
+  FeedSettings settings;
+  if (j.contains("settings")) {
+    from_json(j.at("settings"), settings);
   }
 
-  feed = Feed(ProjectId{projectId}, FeedId{id}, name, parseFeedTypeString(typeStr), config);
+  feed = Feed(ProjectId{projectId}, FeedId{id}, name, AssetId{assetId}, settings);
 }
 
 void to_json(json& j, const Surface& surface) {
@@ -177,7 +241,6 @@ void to_json(json& j, const Surface& surface) {
            {"zOrder", surface.getZOrder()},
            {"rotation", surface.getRotation()}};
 
-  // Surface type-specific serialization
   if (surface.isEllipse()) {
     j["surfaceType"] = "ellipse";
     j["center"] = surface.getCenter();
@@ -203,24 +266,21 @@ void from_json(const json& j, Surface& surface) {
   const int zOrder = requireInteger(j, "zOrder");
   const BlendMode blendMode = parseBlendModeString(blendModeStr);
 
-  // Check surface type (default to polygon for backwards compatibility)
   std::string surfaceType = "polygon";
   if (j.contains("surfaceType") && j["surfaceType"].is_string()) {
     surfaceType = j["surfaceType"].get<std::string>();
   }
 
   if (surfaceType == "ellipse") {
-    // Parse ellipse surface
     const auto& centerJson = requireField<json>(j, "center");
     Vec2 center{};
     from_json(centerJson, center);
     const float radiusX = requireNumber(j, "radiusX");
     const float radiusY = requireNumber(j, "radiusY");
 
-    surface = Surface(SurfaceId{id}, name, center, radiusX, radiusY, FeedId{feedId},
-                      opacity, brightness, blendMode, zOrder);
+    surface = Surface(SurfaceId{id}, name, center, radiusX, radiusY, FeedId{feedId}, opacity, brightness, blendMode,
+                      zOrder);
   } else {
-    // Parse polygon surface (default/legacy)
     const auto& verticesJson = requireField<json>(j, "vertices");
     if (!verticesJson.is_array()) {
       throw std::runtime_error("Field 'vertices' must be an array");
@@ -233,23 +293,23 @@ void from_json(const json& j, Surface& surface) {
       vertices.push_back(vec);
     }
 
-    surface = Surface(SurfaceId{id}, name, vertices, FeedId{feedId}, opacity, brightness,
-                      blendMode, zOrder);
+    surface = Surface(SurfaceId{id}, name, vertices, FeedId{feedId}, opacity, brightness, blendMode, zOrder);
   }
 
-  // Rotation is optional for backward compatibility
   if (j.contains("rotation") && j["rotation"].is_number()) {
     surface.setRotation(j["rotation"].get<float>());
   }
 }
 
-// SceneFilter enum string conversion
 std::string sceneFilterToString(SceneFilter filter) {
   switch (filter) {
-    case SceneFilter::ColorTint: return "colorTint";
-    case SceneFilter::Monochrome: return "monochrome";
+    case SceneFilter::ColorTint:
+      return "colorTint";
+    case SceneFilter::Monochrome:
+      return "monochrome";
     case SceneFilter::None:
-    default: return "none";
+    default:
+      return "none";
   }
 }
 
@@ -260,14 +320,11 @@ SceneFilter sceneFilterFromString(const std::string& str) {
 }
 
 void to_json(json& j, const SceneSettings& settings) {
-  j = json{
-    {"filter", sceneFilterToString(settings.filter)},
-    {"colorPaletteIndex", settings.colorPaletteIndex}
-  };
+  j = json{{"filter", sceneFilterToString(settings.filter)}, {"colorPaletteIndex", settings.colorPaletteIndex}};
 }
 
 void from_json(const json& j, SceneSettings& settings) {
-  settings = SceneSettings{};  // Start with defaults
+  settings = SceneSettings{};
   if (j.contains("filter") && j["filter"].is_string()) {
     settings.filter = sceneFilterFromString(j["filter"].get<std::string>());
   }
@@ -308,7 +365,6 @@ void from_json(const json& j, Scene& scene) {
 
   scene = Scene(ProjectId{projectId}, SceneId{id}, name, description, surfaces);
 
-  // Parse optional settings (backwards compatible - defaults if missing)
   if (j.contains("settings") && j["settings"].is_object()) {
     SceneSettings settings;
     from_json(j["settings"], settings);
@@ -407,8 +463,23 @@ void to_json(json& j, const Project& project) {
   j = json{{"id", project.getId().value},
            {"name", project.getName()},
            {"description", project.getDescription()},
+           {"createdAt", project.getCreatedAt()},
+           {"updatedAt", project.getUpdatedAt()},
+           {"assetIds", json::array()},
+           {"sceneIds", json::array()},
+           {"feedIds", json::array()},
            {"cueOrder", json::array()},
            {"settings", project.getSettings()}};
+
+  for (const auto& assetId : project.getAssetIds()) {
+    j["assetIds"].push_back(assetId.value);
+  }
+  for (const auto& sceneId : project.getSceneIds()) {
+    j["sceneIds"].push_back(sceneId.value);
+  }
+  for (const auto& feedId : project.getFeedIds()) {
+    j["feedIds"].push_back(feedId.value);
+  }
   for (const auto& cueId : project.getCueOrder()) {
     j["cueOrder"].push_back(cueId.value);
   }
@@ -421,14 +492,46 @@ void from_json(const json& j, Project& project) {
   const auto id = requireString(j, "id");
   const auto name = requireString(j, "name");
   const auto description = requireString(j, "description");
-  const auto& cueOrderJson = requireField<json>(j, "cueOrder");
+  const auto createdAt = requireString(j, "createdAt");
+  const auto updatedAt = requireString(j, "updatedAt");
+
+  const auto assetIds = readStringArray(requireField<json>(j, "assetIds"), "assetIds");
+  const auto sceneIds = readStringArray(requireField<json>(j, "sceneIds"), "sceneIds");
+  const auto feedIds = readStringArray(requireField<json>(j, "feedIds"), "feedIds");
+  const auto cueOrder = readStringArray(requireField<json>(j, "cueOrder"), "cueOrder");
 
   ProjectSettings settings{};
   if (j.contains("settings")) {
     from_json(j.at("settings"), settings);
   }
 
-  project = Project(ProjectId{id}, name, description, readCueOrder(cueOrderJson), settings);
+  std::vector<AssetId> assetIdList;
+  assetIdList.reserve(assetIds.size());
+  for (const auto& value : assetIds) {
+    assetIdList.emplace_back(value);
+  }
+
+  std::vector<SceneId> sceneIdList;
+  sceneIdList.reserve(sceneIds.size());
+  for (const auto& value : sceneIds) {
+    sceneIdList.emplace_back(value);
+  }
+
+  std::vector<FeedId> feedIdList;
+  feedIdList.reserve(feedIds.size());
+  for (const auto& value : feedIds) {
+    feedIdList.emplace_back(value);
+  }
+
+  std::vector<CueId> cueIdList;
+  cueIdList.reserve(cueOrder.size());
+  for (const auto& value : cueOrder) {
+    cueIdList.emplace_back(value);
+  }
+
+  project = Project(ProjectId{id}, name, description, createdAt, updatedAt, assetIdList, sceneIdList, feedIdList,
+                    cueIdList, settings);
 }
 
 }  // namespace projection::core
+

@@ -1,9 +1,11 @@
 #include "db/SchemaMigrations.h"
 #include "db/SqliteConnection.h"
 #include "http/HttpServer.h"
+#include "projection/core/Asset.h"
 #include "projection/core/RendererProtocol.h"
 #include "projection/core/Project.h"
 #include "renderer/RendererRegistry.h"
+#include "repo/AssetRepository.h"
 #include "repo/FeedRepository.h"
 #include "repo/ProjectRepository.h"
 #include "repo/SceneRepository.h"
@@ -198,6 +200,7 @@ private:
 
 struct RendererHttpContext {
     db::SqliteConnection connection;
+    repo::AssetRepository assetRepo;
     repo::FeedRepository feedRepo;
     repo::SceneRepository sceneRepo;
     repo::CueRepository cueRepo;
@@ -206,12 +209,13 @@ struct RendererHttpContext {
     http::HttpServer httpServer;
 
     RendererHttpContext(const std::string& dbPath, std::shared_ptr<renderer::RendererRegistry> registry)
-        : feedRepo(connection),
+        : assetRepo(connection),
+          feedRepo(connection),
           sceneRepo(connection),
           cueRepo(connection),
           projectRepo(connection),
           rendererRegistry(std::move(registry)),
-          httpServer(feedRepo, sceneRepo, cueRepo, projectRepo, rendererRegistry) {
+          httpServer(assetRepo, feedRepo, sceneRepo, cueRepo, projectRepo, rendererRegistry) {
         connection.open(dbPath);
         db::SchemaMigrations::applyMigrations(connection);
     }
@@ -283,11 +287,17 @@ TEST_CASE("LoadScene endpoint validates and forwards to renderer", "[http][rende
     const auto dbPath = tempDbPath("renderer_load_scene.db");
     RendererHttpContext ctx(dbPath, registry);
 
-    core::Project project(core::ProjectId{"project-1"}, "Project", "", {}, core::ProjectSettings{});
+    core::Project project(core::ProjectId{"project-1"}, "Project", "", "2026-02-02T10:00:00Z",
+                          "2026-02-02T10:00:00Z", {}, {}, {}, {}, core::ProjectSettings{});
     ctx.projectRepo.createProject(project);
 
-    core::Feed feedA(project.getId(), core::FeedId{}, "Feed A", core::FeedType::VideoFile, R"({"filePath":"a.mp4"})");
-    core::Feed feedB(project.getId(), core::FeedId{}, "Feed B", core::FeedType::VideoFile, R"({"filePath":"b.mp4"})");
+    auto assetA = ctx.assetRepo.createAsset(core::Asset{core::AssetId{}, "A", core::AssetType::VideoFile, "a.mp4"});
+    auto assetB = ctx.assetRepo.createAsset(core::Asset{core::AssetId{}, "B", core::AssetType::VideoFile, "b.mp4"});
+    project.getAssetIds() = {assetA.getId(), assetB.getId()};
+    ctx.projectRepo.updateProject(project);
+
+    core::Feed feedA(project.getId(), core::FeedId{}, "Feed A", assetA.getId());
+    core::Feed feedB(project.getId(), core::FeedId{}, "Feed B", assetB.getId());
     feedA = ctx.feedRepo.createFeed(feedA);
     feedB = ctx.feedRepo.createFeed(feedB);
 
@@ -320,6 +330,7 @@ TEST_CASE("LoadScene endpoint validates and forwards to renderer", "[http][rende
     REQUIRE(messagePayload.feeds.size() == 2);
     REQUIRE(messagePayload.feeds[0].getId().value == feedA.getId().value);
     REQUIRE(messagePayload.feeds[1].getId().value == feedB.getId().value);
+    REQUIRE(messagePayload.assets.size() == 2);
 
     std::filesystem::remove(dbPath);
 }
@@ -336,11 +347,15 @@ TEST_CASE("PlayCue endpoint applies cue overrides and forwards scene", "[http][r
     const auto dbPath = tempDbPath("renderer_play_cue.db");
     RendererHttpContext ctx(dbPath, registry);
 
-    core::Project project(core::ProjectId{"project-1"}, "Project", "", {}, core::ProjectSettings{});
+    core::Project project(core::ProjectId{"project-1"}, "Project", "", "2026-02-02T10:00:00Z",
+                          "2026-02-02T10:00:00Z", {}, {}, {}, {}, core::ProjectSettings{});
     ctx.projectRepo.createProject(project);
 
-    core::Feed feed(project.getId(), core::FeedId{"feed-1"}, "Feed A", core::FeedType::VideoFile,
-                    R"({"filePath":"a.mp4"})");
+    auto asset = ctx.assetRepo.createAsset(core::Asset{core::AssetId{}, "A", core::AssetType::VideoFile, "a.mp4"});
+    project.getAssetIds() = {asset.getId()};
+    ctx.projectRepo.updateProject(project);
+
+    core::Feed feed(project.getId(), core::FeedId{"feed-1"}, "Feed A", asset.getId());
     feed = ctx.feedRepo.createFeed(feed);
 
     std::vector<core::Vec2> quad{{-0.5f, -0.5f}, {0.5f, -0.5f}, {0.5f, 0.5f}, {-0.5f, 0.5f}};

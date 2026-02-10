@@ -31,8 +31,8 @@ describe("SceneCanvas", () => {
         projectId: "proj-1",
         id: "feed-1",
         name: "Feed 1",
-        type: "VideoFile",
-        configJson: { filePath: "/data/assets/clip.mp4" },
+        assetId: "asset-1",
+        settings: {},
       },
     ];
 
@@ -88,8 +88,8 @@ describe("SceneCanvas", () => {
         projectId: "proj-1",
         id: "feed-1",
         name: "Feed 1",
-        type: "VideoFile",
-        configJson: { filePath: "/data/assets/clip.mp4" },
+        assetId: "asset-1",
+        settings: {},
       },
     ];
 
@@ -146,8 +146,8 @@ describe("SceneCanvas", () => {
         projectId: "proj-1",
         id: "feed-1",
         name: "Feed 1",
-        type: "VideoFile",
-        configJson: { filePath: "/data/assets/clip.mp4" },
+        assetId: "asset-1",
+        settings: {},
       },
     ];
 

@@ -1,6 +1,7 @@
 #include "db/SchemaMigrations.h"
 #include "db/SqliteConnection.h"
 #include "http/HttpServer.h"
+#include "repo/AssetRepository.h"
 #include "repo/CueRepository.h"
 #include "repo/FeedRepository.h"
 #include "repo/ProjectRepository.h"
@@ -90,15 +91,10 @@ bool waitForServer(httplib::Client& client, http::HttpServer& server) {
 
 }  // namespace
 
-TEST_CASE("GET /api/assets lists asset files", "[http][assets]") {
+TEST_CASE("GET /api/assets lists asset records", "[http][assets]") {
     const auto base = std::filesystem::temp_directory_path() / "lumi-assets-test";
     std::filesystem::remove_all(base);
     std::filesystem::create_directories(base / "data" / "assets");
-
-    const auto clipPath = base / "data" / "assets" / "clipA.mp4";
-    const auto imagePath = base / "data" / "assets" / "poster.png";
-    writeFile(clipPath, "dummy");
-    writeFile(imagePath, "dummy");
 
     const auto previousPath = std::filesystem::current_path();
     std::filesystem::current_path(base);
@@ -107,11 +103,16 @@ TEST_CASE("GET /api/assets lists asset files", "[http][assets]") {
     connection.open(tempDbPath("lumi-assets.db"));
     db::SchemaMigrations::applyMigrations(connection);
 
+    repo::AssetRepository assetRepo(connection);
     repo::FeedRepository feedRepo(connection);
     repo::SceneRepository sceneRepo(connection);
     repo::CueRepository cueRepo(connection);
     repo::ProjectRepository projectRepo(connection);
-    http::HttpServer httpServer(feedRepo, sceneRepo, cueRepo, projectRepo, nullptr, true, "");
+
+    assetRepo.createAsset(core::Asset{core::AssetId{}, "Clip A", core::AssetType::VideoFile, "clipA.mp4"});
+    assetRepo.createAsset(core::Asset{core::AssetId{}, "Poster", core::AssetType::ImageFile, "poster.png"});
+
+    http::HttpServer httpServer(assetRepo, feedRepo, sceneRepo, cueRepo, projectRepo, nullptr, true, "");
 
     const int port = reservePort();
     ServerRunner runner(httpServer, port);
@@ -121,8 +122,8 @@ TEST_CASE("GET /api/assets lists asset files", "[http][assets]") {
     auto res = client->Get("/api/assets");
     REQUIRE(res != nullptr);
     REQUIRE(res->status == 200);
-    REQUIRE(res->body.find("clipA.mp4") != std::string::npos);
-    REQUIRE(res->body.find("poster.png") != std::string::npos);
+    REQUIRE(res->body.find("Clip A") != std::string::npos);
+    REQUIRE(res->body.find("Poster") != std::string::npos);
 
     std::filesystem::current_path(previousPath);
     std::filesystem::remove_all(base);
@@ -140,11 +141,12 @@ TEST_CASE("POST /api/assets uploads a new asset", "[http][assets]") {
     connection.open(tempDbPath("lumi-assets-upload.db"));
     db::SchemaMigrations::applyMigrations(connection);
 
+    repo::AssetRepository assetRepo(connection);
     repo::FeedRepository feedRepo(connection);
     repo::SceneRepository sceneRepo(connection);
     repo::CueRepository cueRepo(connection);
     repo::ProjectRepository projectRepo(connection);
-    http::HttpServer httpServer(feedRepo, sceneRepo, cueRepo, projectRepo, nullptr, true, "");
+    http::HttpServer httpServer(assetRepo, feedRepo, sceneRepo, cueRepo, projectRepo, nullptr, true, "");
 
     const int port = reservePort();
     ServerRunner runner(httpServer, port);
@@ -163,7 +165,7 @@ TEST_CASE("POST /api/assets uploads a new asset", "[http][assets]") {
     std::filesystem::remove_all(base);
 }
 
-TEST_CASE("DELETE /api/assets/{name} removes an asset", "[http][assets]") {
+TEST_CASE("DELETE /api/assets/{id} removes an asset", "[http][assets]") {
     const auto base = std::filesystem::temp_directory_path() / "lumi-assets-delete-test";
     std::filesystem::remove_all(base);
     std::filesystem::create_directories(base / "data" / "assets");
@@ -178,18 +180,22 @@ TEST_CASE("DELETE /api/assets/{name} removes an asset", "[http][assets]") {
     connection.open(tempDbPath("lumi-assets-delete.db"));
     db::SchemaMigrations::applyMigrations(connection);
 
+    repo::AssetRepository assetRepo(connection);
     repo::FeedRepository feedRepo(connection);
     repo::SceneRepository sceneRepo(connection);
     repo::CueRepository cueRepo(connection);
     repo::ProjectRepository projectRepo(connection);
-    http::HttpServer httpServer(feedRepo, sceneRepo, cueRepo, projectRepo, nullptr, true, "");
+    auto asset = assetRepo.createAsset(core::Asset{core::AssetId{}, "Clip D", core::AssetType::VideoFile,
+                                                   targetPath.string()});
+
+    http::HttpServer httpServer(assetRepo, feedRepo, sceneRepo, cueRepo, projectRepo, nullptr, true, "");
 
     const int port = reservePort();
     ServerRunner runner(httpServer, port);
     auto client = makeClient(port);
     REQUIRE(waitForServer(*client, httpServer));
 
-    auto res = client->Delete("/api/assets/clipD.mp4");
+    auto res = client->Delete(std::string("/api/assets/") + asset.getId().value);
     REQUIRE(res != nullptr);
     REQUIRE(res->status == 204);
     REQUIRE(!std::filesystem::exists(targetPath));
@@ -199,3 +205,4 @@ TEST_CASE("DELETE /api/assets/{name} removes an asset", "[http][assets]") {
 }
 
 }  // namespace projection::server
+

@@ -55,6 +55,11 @@ describe("FeedBrowser", () => {
       id: "project-1",
       name: "Project",
       description: "",
+      createdAt: "2026-02-02T10:00:00Z",
+      updatedAt: "2026-02-02T10:00:00Z",
+      assetIds: [],
+      sceneIds: [],
+      feedIds: [],
       cueOrder: [],
       settings: {
         controllers: {},
@@ -68,13 +73,13 @@ describe("FeedBrowser", () => {
       projectId: "project-1",
       id: "feed-1",
       name: "Feed",
-      type: "VideoFile",
-      configJson: { filePath: "/data/assets/clip.mp4" },
+      assetId: "asset-1",
+      settings: {},
     });
 
     const assetStore = useAssetStore();
     assetStore.assets = [
-      { id: "clip.mp4", name: "clip.mp4", path: "/data/assets/clip.mp4", type: "video" },
+      { id: "asset-1", name: "clip.mp4", path: "/data/assets/clip.mp4", type: "VideoFile", variants: [] },
     ];
 
     const wrapper = mount(FeedBrowser, {
@@ -92,15 +97,14 @@ describe("FeedBrowser", () => {
     });
 
     await wrapper.get('[data-testid="feed-name"]').setValue("Main Feed");
-    await wrapper.get('[data-testid="feed-asset"]').setValue("/data/assets/clip.mp4");
+    await wrapper.get('[data-testid="feed-asset"]').setValue("asset-1");
     await wrapper.get('[data-testid="feed-create"]').trigger("click");
 
     expect(createSpy).toHaveBeenCalledTimes(1);
     const payload = createSpy.mock.calls[0][0];
     expect(payload.projectId).toBe("project-1");
     expect(payload.name).toBe("Main Feed");
-    expect(payload.type).toBe("VideoFile");
-    expect(payload.configJson).toEqual({ filePath: "/data/assets/clip.mp4" });
+    expect(payload.assetId).toBe("asset-1");
     expect(payload.id).toMatch(/^feed-/);
   });
 });

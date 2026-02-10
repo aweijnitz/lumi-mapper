@@ -19,7 +19,7 @@ This project is a **projection/video mapping engine** that:
 
 High-level goals:
 
-- A **core C++ library** encapsulating domain logic (projects, scenes, surfaces, feeds, cues, scene settings).
+ - A **core C++ library** encapsulating domain logic (projects, assets, scenes, surfaces, feeds, cues, scene settings).
 - A **C++ server** exposing a **remote API** (over TCP/IP) using the core library.
 - One or more clients (C++ CLI plus a Vue-based Composer UI) using that API.
 - A **C++ rendering engine** that connects to the projector and executes scenes in real time.
@@ -37,8 +37,8 @@ The repo is structured as a C++-oriented monorepo with four main components:
 1. **Core Library (`/core`)**
    - Language: **C++17+**.
    - Responsibility: Domain model & logic only. No networking, no rendering, no DB.
-   - Knows about: Projects, Scenes (with per-scene filter settings), Surfaces (polygon/ellipse, rotation, blend mode, z-order),
-     Feeds (VideoFile/ImageFile/Camera/Generated), Cues (surface overrides).
+   - Knows about: Projects, Assets (VideoFile/ImageFile), Feeds (asset wrappers + settings), Scenes (with per-scene filter settings),
+     Surfaces (polygon/ellipse, rotation, blend mode, z-order), Cues (surface overrides).
    - Includes: JSON serialization helpers, renderer protocol message types, and validation utilities for IDs and the main entities.
    - Used by: Server and (optionally) headless tools/clients.
 
@@ -52,7 +52,7 @@ The repo is structured as a C++-oriented monorepo with four main components:
      - Coordinate with the **Renderer** process to apply changes & control playback.
      - Listen for renderer connections and keep an in-memory registry of connected renderers by unique name.
    - The **server machine is physically connected to the projector** (via the Renderer).
-   - The server exposes a **HTTP+JSON** API with `/api/projects`, project-scoped endpoints like `/api/projects/{projectId}/feeds|scenes|cues`, renderer control under `/api/projects/{projectId}/renderer/*`, plus `/api/renderer/*` and `/api/demo/*`.
+   - The server exposes a **HTTP+JSON** API with `/api/projects`, project-scoped endpoints like `/api/projects/{projectId}/feeds|scenes|cues`, renderer control under `/api/projects/{projectId}/renderer/*`, and `/api/renderer/*`.
    - Persistence is handled through the DB module (e.g., `db::SqliteConnection`, `db::SchemaMigrations`) and repository layer.
    - HTTP transport is implemented with the vendored single-header **cpp-httplib** server (`server/third_party/httplib.h`) inside the `http::HttpServer` wrapper.
 
@@ -75,18 +75,18 @@ The repo is structured as a C++-oriented monorepo with four main components:
 ### 2.1 Data Flow Overview
 
 - **Clients → Server**
-  - CRUD operations on Project-scoped Scenes, Surfaces, Feeds, Cues.
+  - CRUD operations on Project-scoped Assets, Feeds, Scenes, Surfaces, Cues.
   - CRUD operations on Projects (ordered cues + project settings).
   - Playback control: `play`, `pause`, `gotoCue`, etc.
 
 - **Server → SQLite3 & Assets**
   - Persists domain state in an embedded SQLite3 database file on local disk.
-  - Associates logical feeds with asset paths on disk.
+  - Associates projects to assets (many-to-many) and feeds to asset IDs.
 
 - **Server → Renderer**
   - Sends high-level commands:
     - “Load this Scene definition”
-      - Use the `loadSceneDefinition` renderer protocol message to send the full Scene plus referenced Feeds as a single payload.
+      - Use the `loadSceneDefinition` renderer protocol message to send the full Scene plus referenced Feeds and Assets as a single payload.
     - “Update Surface #23 vertices”
     - “Switch Feed of Surface #10 to `feedId=xyz`”
     - “Play / Pause / Seek cue X”
@@ -101,19 +101,21 @@ The repo is structured as a C++-oriented monorepo with four main components:
   - Fullscreen rendering window on the projector display (server machine’s GPU output).
 
 > **Renderer protocol & inputs:**
-> - `LoadSceneDefinition` is a supported control message for sending a full Scene plus the referenced Feeds in one payload.
+> - `LoadSceneDefinition` is a supported control message for sending a full Scene plus the referenced Feeds and Assets in one payload.
 > - Renderer control messages include project-scoped ids (e.g., `projectId` alongside scene/cue/feed ids).
 > - `Hello` payloads from renderers include `version`, `role`, a unique `name`, and the renderer `width`/`height`; the server uses `name` to register each renderer and track dimensions for previews.
 > - Renderer protocol also supports `ShowTestPattern` (calibration grid) and `ShowCrosshair` (drag alignment).
 > - The renderer consumes MIDI via `ofxMidi` (e.g., CC #1 mapped to brightness) and audio input energy to modulate scale.
 
 ### 2.2 Project Model & API Surface
-- **Project fields:** `id`, `name`, `description`, ordered `cueOrder`, and `settings` (controllers map, MIDI channels, global config key/values).
-- **Scoped entities:** `Feed`, `Scene`, and `Cue` are all scoped by `projectId`; IDs are unique within a project.
+- **Project fields:** `id`, `name`, `description`, `createdAt`, `updatedAt`, ordered `cueOrder`, and collections `assetIds`, `sceneIds`, `feedIds`, plus `settings` (controllers map, MIDI channels, global config key/values).
+- **Scoped entities:** `Feed`, `Scene`, and `Cue` are scoped by `projectId`; IDs are unique within a project. `Asset` may be global or project-associated (via `project_assets`).
+- **Asset fields:** `id`, `name`, `type` (`VideoFile`/`ImageFile`), `path`, `variants[]` (objects with `path` + `note`).
 - **Scene fields:** `surfaces[]` plus `settings` (filter, palette index).
 - **Surface fields:** type (`Polygon` or `Ellipse`), vertices or center/radii, rotation (degrees), blend mode, z-order, opacity/brightness.
-- **Feed types:** `VideoFile`, `ImageFile` (with pan settings), `Camera`, `Generated` (renderer currently loads VideoFile/ImageFile).
-- **Persistence:** tables `projects`, `feeds`, `scenes`, `surfaces`, `cues`, and `project_cues` are keyed by `project_id` in SQLite.
+- **Feed settings:** reference `assetId` plus per-feed effects (variant path selection, monochrome filter, pan settings).
+- **Asset types:** `VideoFile`, `ImageFile` (renderer currently loads VideoFile/ImageFile).
+- **Persistence:** tables `projects`, `assets`, `project_assets`, `feeds`, `scenes`, `surfaces`, `cues` are keyed by `project_id` in SQLite where applicable.
 - **Validation:** project references must point to existing cues in the same project; MIDI channels limited to 1–16; controller names/targets must be non-empty.
 - **HTTP API:** 
   - `GET /projects` list projects, `GET /projects/{id}` fetch one.
@@ -123,14 +125,15 @@ The repo is structured as a C++-oriented monorepo with four main components:
 - `GET/POST/PUT/DELETE /projects/{projectId}/cues` (with `PUT/DELETE` on `/projects/{projectId}/cues/{cueId}`).
 - `POST /projects/{projectId}/renderer/loadScene` loads a scene from the specified project.
 - `POST /projects/{projectId}/renderer/playCue` loads the cue's scene (including cue surface overrides) on the renderer.
-- `GET /assets` lists filesystem assets (same under `/api/assets`) to populate the Composer asset browser.
-- `POST /assets` uploads an asset (multipart/form-data `file`, 2GB max).
-- `DELETE /assets/{name}` removes an asset by filename.
+- `GET /assets` lists assets (same under `/api/assets`) to populate the Composer asset browser.
+- `POST /assets` uploads an asset (multipart/form-data `file`, 2GB max) and creates an Asset record.
+- `GET/POST /projects/{projectId}/assets` lists/creates project-scoped assets (upload + associate).
+- `POST /projects/{projectId}/assets/{assetId}` associates an existing asset to a project.
+- `DELETE /projects/{projectId}/assets/{assetId}` removes a project association.
+- `DELETE /assets/{assetId}` removes an asset by id (and deletes the file).
 - `GET/POST /renderer/ping` returns connected renderer names and dimensions.
 - `POST /renderer/testPattern` toggles calibration grid on renderers.
 - `POST /renderer/crosshair` shows/hides a crosshair overlay at a normalized position.
-- `POST /demo/two-video-test` builds a temporary demo project and loads it on the renderer.
-- `POST /demo/clear-projects` removes demo projects (`demo-*`).
 - Cue deletion is blocked when the cue is referenced by the same project.
 - The server accepts both `/api/...` and root-level `/...` paths for the HTTP API.
 
@@ -179,7 +182,7 @@ Examples:
 
 - **JSON**: The `/core` library uses [nlohmann::json](https://github.com/nlohmann/json) for serialization. It is vendored as a
   single header at `core/third_party/nlohmann/json.hpp` and can be included with `<nlohmann/json.hpp>`. The serialization module
-  provides the JSON conversions for IDs, enums, and the Feed/Surface/Scene/Cue classes.
+  provides the JSON conversions for IDs, enums, and the Asset/Feed/Surface/Scene/Cue classes.
 - **HTTP**: The server uses the single-header [cpp-httplib](https://github.com/yhirose/cpp-httplib) library vendored at
   `server/third_party/httplib.h`.
 

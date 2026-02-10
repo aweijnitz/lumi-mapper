@@ -1,44 +1,36 @@
 #include "projection/core/Feed.h"
 
 #include <catch2/catch_test_macros.hpp>
-#include <stdexcept>
 
+using projection::core::AssetId;
 using projection::core::Feed;
 using projection::core::FeedId;
-using projection::core::FeedType;
+using projection::core::FeedSettings;
+using projection::core::PanDirection;
 using projection::core::ProjectId;
-using projection::core::VideoFileConfig;
-using projection::core::makeVideoFileFeed;
-using projection::core::parseVideoFileConfig;
+using projection::core::makeFeed;
 
-TEST_CASE("makeVideoFileFeed round-trips file path", "[core][feed][config]") {
-    const std::string filePath = "/videos/demo.mp4";
-    Feed feed = makeVideoFileFeed(ProjectId{"project-1"}, FeedId{"10"}, "Demo", filePath);
+TEST_CASE("Feed settings store variant selection and pan defaults", "[core][feed][settings]") {
+    FeedSettings settings;
+    settings.variantPath = "/assets/demo_low.mp4";
+    settings.monochrome = true;
+    settings.panDirection = PanDirection::PingPong;
+    settings.panDurationSeconds = 30.0f;
+    settings.visiblePortion = 0.5f;
 
-    REQUIRE(feed.getType() == FeedType::VideoFile);
+    Feed feed = makeFeed(ProjectId{"project-1"}, FeedId{"10"}, "Demo", AssetId{"asset-1"}, settings);
 
-    VideoFileConfig config = parseVideoFileConfig(feed);
-    REQUIRE(config.filePath == filePath);
+    REQUIRE(feed.getAssetId() == AssetId{"asset-1"});
+    REQUIRE(feed.getSettings() == settings);
 }
 
-TEST_CASE("parseVideoFileConfig rejects non-video feeds", "[core][feed][config][error]") {
-    Feed feed(ProjectId{"project-1"}, FeedId{"11"}, "Camera", FeedType::Camera, "{}");
-    bool threw = false;
-    try {
-        parseVideoFileConfig(feed);
-    } catch (const std::runtime_error&) {
-        threw = true;
-    }
-    REQUIRE(threw);
+TEST_CASE("Feed settings default values are stable", "[core][feed][settings]") {
+    Feed feed = makeFeed(ProjectId{"project-1"}, FeedId{"11"}, "Default", AssetId{"asset-2"});
+
+    REQUIRE(feed.getSettings().variantPath.empty());
+    REQUIRE(feed.getSettings().monochrome == false);
+    REQUIRE(feed.getSettings().panDirection == PanDirection::LeftToRight);
+    REQUIRE(feed.getSettings().panDurationSeconds == 120.0f);
+    REQUIRE(feed.getSettings().visiblePortion == 0.6f);
 }
 
-TEST_CASE("parseVideoFileConfig validates config JSON", "[core][feed][config][error]") {
-    Feed feed(ProjectId{"project-1"}, FeedId{"12"}, "Video", FeedType::VideoFile, "{\"wrong\":true}");
-    bool threw = false;
-    try {
-        parseVideoFileConfig(feed);
-    } catch (const std::runtime_error&) {
-        threw = true;
-    }
-    REQUIRE(threw);
-}

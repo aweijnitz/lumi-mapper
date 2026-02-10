@@ -1,9 +1,11 @@
 #include "db/SchemaMigrations.h"
 #include "db/SqliteConnection.h"
+#include "projection/core/Asset.h"
 #include "projection/core/Feed.h"
 #include "projection/core/Project.h"
 #include "projection/core/Scene.h"
 #include "projection/core/Surface.h"
+#include "repo/AssetRepository.h"
 #include "repo/FeedRepository.h"
 #include "repo/ProjectRepository.h"
 #include "repo/SceneRepository.h"
@@ -16,8 +18,10 @@
 #include <string>
 #include <vector>
 
+using projection::core::Asset;
+using projection::core::AssetId;
+using projection::core::AssetType;
 using projection::core::Feed;
-using projection::core::FeedType;
 using projection::core::Project;
 using projection::core::ProjectId;
 using projection::core::ProjectSettings;
@@ -27,6 +31,7 @@ using projection::core::makeFeedId;
 using projection::core::makeSceneId;
 using projection::server::db::SchemaMigrations;
 using projection::server::db::SqliteConnection;
+using projection::server::repo::AssetRepository;
 using projection::server::repo::FeedRepository;
 using projection::server::repo::ProjectRepository;
 using projection::server::repo::SceneRepository;
@@ -57,7 +62,8 @@ bool expectRuntimeError(const std::function<void()>& fn) {
 
 Project createProject(ProjectRepository& repo, const ProjectId& projectId) {
     ProjectSettings settings;
-    Project project(projectId, "Test Project", "", {}, settings);
+    Project project(projectId, "Test Project", "", "2026-02-02T10:00:00Z", "2026-02-02T10:00:00Z", {}, {}, {}, {},
+                    settings);
     return repo.createProject(project);
 }
 }
@@ -66,17 +72,19 @@ TEST_CASE("FeedRepository creates and lists feeds", "[repo][feed]") {
     SqliteConnection connection;
     setupTestDb(connection, "feed_repo.sqlite");
 
+    AssetRepository assetRepo(connection);
     FeedRepository repo(connection);
     ProjectRepository projectRepo(connection);
     auto project = createProject(projectRepo, makeProjectId("proj-1"));
 
-    Feed feedWithoutId(project.getId(), makeFeedId(""), "Test Feed", FeedType::VideoFile,
-                       R"({\"path\": \"video.mp4\"})");
+    auto asset = assetRepo.createAsset(Asset{AssetId{}, "Clip", AssetType::VideoFile, "/media/video.mp4"});
+
+    Feed feedWithoutId(project.getId(), makeFeedId(""), "Test Feed", asset.getId());
     Feed created = repo.createFeed(feedWithoutId);
     REQUIRE(!created.getId().value.empty());
     REQUIRE(created.getName() == "Test Feed");
 
-    Feed explicitIdFeed(project.getId(), makeFeedId("42"), "Second", FeedType::Camera, "{}");
+    Feed explicitIdFeed(project.getId(), makeFeedId("42"), "Second", asset.getId());
     Feed createdWithId = repo.createFeed(explicitIdFeed);
     REQUIRE(createdWithId.getId().value == "42");
 
@@ -86,7 +94,7 @@ TEST_CASE("FeedRepository creates and lists feeds", "[repo][feed]") {
                         [&](const Feed& f) { return f.getId() == created.getId() && f.getName() == "Test Feed"; }));
     auto fetched = repo.findFeedById(project.getId(), makeFeedId("42"));
     REQUIRE(fetched.has_value());
-    REQUIRE(fetched->getType() == FeedType::Camera);
+    REQUIRE(fetched->getAssetId() == asset.getId());
 }
 
 TEST_CASE("SceneRepository creates and lists scenes", "[repo][scene]") {
@@ -121,10 +129,12 @@ TEST_CASE("FeedRepository accepts string ids", "[repo][feed]") {
     SqliteConnection connection;
     setupTestDb(connection, "feed_repo_error.sqlite");
 
+    AssetRepository assetRepo(connection);
     FeedRepository repo(connection);
     ProjectRepository projectRepo(connection);
     auto project = createProject(projectRepo, makeProjectId("proj-1"));
-    Feed customId(project.getId(), makeFeedId("abc-123"), "Custom", FeedType::Generated, "{}");
+    auto asset = assetRepo.createAsset(Asset{AssetId{}, "Clip", AssetType::VideoFile, "/media/video.mp4"});
+    Feed customId(project.getId(), makeFeedId("abc-123"), "Custom", asset.getId());
 
     Feed created = repo.createFeed(customId);
     REQUIRE(created.getId().value == "abc-123");
@@ -145,3 +155,4 @@ TEST_CASE("SceneRepository prevents duplicate numeric ids", "[repo][scene][error
     repo.createScene(sceneA);
     REQUIRE(expectRuntimeError([&]() { repo.createScene(sceneB); }));
 }
+

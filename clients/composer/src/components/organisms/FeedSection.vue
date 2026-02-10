@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, ref } from "vue";
 import { storeToRefs } from "pinia";
 import Button from "primevue/button";
 import DataTable from "primevue/datatable";
@@ -7,15 +7,14 @@ import Column from "primevue/column";
 import InputText from "primevue/inputtext";
 import InputNumber from "primevue/inputnumber";
 import Message from "primevue/message";
-import Select from "primevue/select";
 import Slider from "primevue/slider";
 import SectionHeader from "../atoms/SectionHeader.vue";
 import { useProjectStore } from "../../stores/projectStore";
 import { useFeedStore } from "../../stores/feedStore";
 import { useAssetStore } from "../../stores/assetStore";
 import { createId } from "../../composables/useIds";
-import type { Feed, FeedType, PanDirection, ImageFileConfig } from "../../types/feed";
-import { defaultImagePanSettings, panDirectionLabels } from "../../types/feed";
+import type { Feed, PanDirection } from "../../types/feed";
+import { defaultFeedSettings, panDirectionLabels } from "../../types/feed";
 
 const projectStore = useProjectStore();
 const feedStore = useFeedStore();
@@ -24,16 +23,9 @@ const { feeds, activeFeed, isLoading, error } = storeToRefs(feedStore);
 const { activeAsset } = storeToRefs(assetStore);
 
 const name = ref("");
-const feedType = ref<FeedType>("VideoFile");
-const panDirection = ref<PanDirection>(defaultImagePanSettings.panDirection);
-const panDurationSeconds = ref(defaultImagePanSettings.panDurationSeconds);
-const visiblePortion = ref(defaultImagePanSettings.visiblePortion * 100); // Stored as percentage for slider
-
-// Feed type options
-const feedTypeOptions = [
-  { value: "VideoFile", label: "Video" },
-  { value: "ImageFile", label: "Image (with Pan)" },
-];
+const panDirection = ref<PanDirection>(defaultFeedSettings.panDirection);
+const panDurationSeconds = ref(defaultFeedSettings.panDurationSeconds);
+const visiblePortion = ref(defaultFeedSettings.visiblePortion * 100); // Stored as percentage for slider
 
 // Pan direction options
 const panDirectionOptions = Object.entries(panDirectionLabels).map(([value, label]) => ({
@@ -43,20 +35,9 @@ const panDirectionOptions = Object.entries(panDirectionLabels).map(([value, labe
 
 const selectedAssetPath = computed(() => activeAsset.value?.path ?? "");
 const selectedAssetName = computed(() => activeAsset.value?.name ?? "");
-const selectedAssetType = computed(() => activeAsset.value?.type ?? "unknown");
-
-// Auto-select feed type based on asset type from server
-watch(
-  () => activeAsset.value?.type,
-  (assetType) => {
-    if (assetType === "image") {
-      feedType.value = "ImageFile";
-    } else {
-      feedType.value = "VideoFile";
-    }
-  },
-  { immediate: true },
-);
+const selectedAssetType = computed(() => activeAsset.value?.type ?? "VideoFile");
+const assetById = computed(() => new Map(assetStore.assets.map((asset) => [asset.id, asset])));
+const getAssetTypeForFeed = (feed: Feed) => assetById.value.get(feed.assetId)?.type ?? "VideoFile";
 
 const canCreate = computed(() =>
   Boolean(
@@ -72,38 +53,28 @@ const createFeed = async () => {
     return;
   }
 
-  console.log("[FeedSection] Creating feed with type:", feedType.value);
-
-  let configJson: Record<string, unknown>;
-
-  if (feedType.value === "ImageFile") {
-    const imageConfig: ImageFileConfig = {
-      filePath: selectedAssetPath.value,
-      panDirection: panDirection.value,
-      panDurationSeconds: panDurationSeconds.value,
-      visiblePortion: visiblePortion.value / 100, // Convert from percentage
-    };
-    configJson = imageConfig as Record<string, unknown>;
-  } else {
-    configJson = {
-      filePath: selectedAssetPath.value,
-    };
-  }
+  const settings = {
+    variantPath: "",
+    monochrome: false,
+    panDirection: panDirection.value,
+    panDurationSeconds: panDurationSeconds.value,
+    visiblePortion: visiblePortion.value / 100,
+  };
 
   const payload: Feed = {
     projectId: projectStore.activeProject.id,
     id: createId("feed"),
     name: name.value.trim(),
-    type: feedType.value,
-    configJson,
+    assetId: activeAsset.value?.id ?? "",
+    settings,
   };
 
   await feedStore.createFeed(payload);
   name.value = "";
   // Reset pan settings to defaults
-  panDirection.value = defaultImagePanSettings.panDirection;
-  panDurationSeconds.value = defaultImagePanSettings.panDurationSeconds;
-  visiblePortion.value = defaultImagePanSettings.visiblePortion * 100;
+  panDirection.value = defaultFeedSettings.panDirection;
+  panDurationSeconds.value = defaultFeedSettings.panDurationSeconds;
+  visiblePortion.value = defaultFeedSettings.visiblePortion * 100;
 };
 
 </script>
@@ -121,7 +92,7 @@ const createFeed = async () => {
         <InputText v-model="name" placeholder="Feed name" />
         <div class="feed-section__asset-display">
           <template v-if="activeAsset">
-            <i :class="selectedAssetType === 'image' ? 'pi pi-image' : 'pi pi-video'" class="feed-section__asset-icon" />
+            <i :class="selectedAssetType === 'ImageFile' ? 'pi pi-image' : 'pi pi-video'" class="feed-section__asset-icon" />
             <span class="feed-section__asset-name">{{ selectedAssetName }}</span>
             <span :class="['feed-section__asset-type', `feed-section__asset-type--${selectedAssetType}`]">
               {{ selectedAssetType }}
@@ -131,24 +102,16 @@ const createFeed = async () => {
         </div>
       </div>
       <div class="feed-section__type-row">
-        <span class="feed-section__type-label">Feed Type:</span>
-        <Select
-          v-model="feedType"
-          :options="feedTypeOptions"
-          optionLabel="label"
-          optionValue="value"
-          placeholder="Type"
-          class="feed-section__type-select"
-        />
-        <span :class="['feed-section__type-badge', `feed-section__type-badge--${feedType}`]">
-          <i :class="feedType === 'ImageFile' ? 'pi pi-image' : 'pi pi-video'" />
-          {{ feedType === 'ImageFile' ? 'Image' : 'Video' }}
+        <span class="feed-section__type-label">Asset Type:</span>
+        <span :class="['feed-section__type-badge', `feed-section__type-badge--${selectedAssetType}`]">
+          <i :class="selectedAssetType === 'ImageFile' ? 'pi pi-image' : 'pi pi-video'" />
+          {{ selectedAssetType === 'ImageFile' ? 'Image' : 'Video' }}
         </span>
         <Button label="Add Feed" icon="pi pi-plus" :disabled="!canCreate" @click="createFeed" />
       </div>
 
       <!-- Pan settings for Image feeds -->
-      <div v-if="feedType === 'ImageFile'" class="feed-section__pan-settings">
+      <div v-if="selectedAssetType === 'ImageFile'" class="feed-section__pan-settings">
         <div class="feed-section__setting">
           <label class="feed-section__label">Pan Direction</label>
           <Select
@@ -191,9 +154,9 @@ const createFeed = async () => {
         <Column field="name" header="Feed" />
         <Column field="type" header="Type">
           <template #body="{ data }">
-            <span :class="['feed-section__feed-type', `feed-section__feed-type--${data.type}`]">
-              <i :class="data.type === 'ImageFile' ? 'pi pi-image' : 'pi pi-video'" />
-              {{ data.type === 'ImageFile' ? 'Image' : 'Video' }}
+            <span :class="['feed-section__feed-type', `feed-section__feed-type--${getAssetTypeForFeed(data)}`]">
+              <i :class="getAssetTypeForFeed(data) === 'ImageFile' ? 'pi pi-image' : 'pi pi-video'" />
+              {{ getAssetTypeForFeed(data) === 'ImageFile' ? 'Image' : 'Video' }}
             </span>
           </template>
         </Column>

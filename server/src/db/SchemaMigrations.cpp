@@ -16,12 +16,49 @@ CREATE TABLE IF NOT EXISTS schema_version (
 );
 )SQL";
 
+const char* kDropOldTables = R"SQL(
+DROP TABLE IF EXISTS project_cues;
+DROP TABLE IF EXISTS cues;
+DROP TABLE IF EXISTS surfaces;
+DROP TABLE IF EXISTS scenes;
+DROP TABLE IF EXISTS feeds;
+DROP TABLE IF EXISTS project_assets;
+DROP TABLE IF EXISTS assets;
+DROP TABLE IF EXISTS projects;
+)SQL";
+
 const char* kCreateProjectsTable = R"SQL(
 CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    asset_ids_json TEXT NOT NULL,
+    scene_ids_json TEXT NOT NULL,
+    feed_ids_json TEXT NOT NULL,
+    cue_order_json TEXT NOT NULL,
     settings_json TEXT NOT NULL
+);
+)SQL";
+
+const char* kCreateAssetsTable = R"SQL(
+CREATE TABLE IF NOT EXISTS assets (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    path TEXT NOT NULL,
+    variants_json TEXT NOT NULL
+);
+)SQL";
+
+const char* kCreateProjectAssetsTable = R"SQL(
+CREATE TABLE IF NOT EXISTS project_assets (
+    project_id TEXT NOT NULL,
+    asset_id TEXT NOT NULL,
+    PRIMARY KEY(project_id, asset_id),
+    FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    FOREIGN KEY(asset_id) REFERENCES assets(id) ON DELETE CASCADE
 );
 )SQL";
 
@@ -30,10 +67,11 @@ CREATE TABLE IF NOT EXISTS feeds (
     project_id TEXT NOT NULL,
     id TEXT NOT NULL,
     name TEXT NOT NULL,
-    type TEXT NOT NULL,
-    config_json TEXT NOT NULL,
+    asset_id TEXT NOT NULL,
+    settings_json TEXT NOT NULL,
     PRIMARY KEY(project_id, id),
-    FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+    FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    FOREIGN KEY(asset_id) REFERENCES assets(id)
 );
 )SQL";
 
@@ -43,6 +81,7 @@ CREATE TABLE IF NOT EXISTS scenes (
     id TEXT NOT NULL,
     name TEXT NOT NULL,
     description TEXT,
+    settings_json TEXT NOT NULL,
     PRIMARY KEY(project_id, id),
     FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
@@ -60,6 +99,7 @@ CREATE TABLE IF NOT EXISTS surfaces (
     brightness REAL NOT NULL,
     blend_mode TEXT NOT NULL,
     vertices_json TEXT NOT NULL,
+    rotation REAL NOT NULL DEFAULT 0,
     PRIMARY KEY(project_id, id),
     FOREIGN KEY(project_id, scene_id) REFERENCES scenes(project_id, id) ON DELETE CASCADE,
     FOREIGN KEY(project_id, feed_id) REFERENCES feeds(project_id, id)
@@ -80,45 +120,17 @@ CREATE TABLE IF NOT EXISTS cues (
 );
 )SQL";
 
-const char* kCreateProjectCuesTable = R"SQL(
-CREATE TABLE IF NOT EXISTS project_cues (
-    project_id TEXT NOT NULL,
-    cue_id TEXT NOT NULL,
-    position INTEGER NOT NULL,
-    PRIMARY KEY(project_id, position),
-    FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
-    FOREIGN KEY(project_id, cue_id) REFERENCES cues(project_id, id),
-    UNIQUE(project_id, cue_id)
-);
-)SQL";
-
-// Migration: Add rotation column to surfaces table (defaults to 0)
-const char* kMigrationAddRotationColumn = R"SQL(
-ALTER TABLE surfaces ADD COLUMN rotation REAL NOT NULL DEFAULT 0;
-)SQL";
-
-// Migration: Add settings_json column to scenes table (defaults to empty object)
-const char* kMigrationAddSceneSettingsColumn = R"SQL(
-ALTER TABLE scenes ADD COLUMN settings_json TEXT NOT NULL DEFAULT '{}';
-)SQL";
-
-int getSchemaVersion(sqlite3* handle) {
-    const char* sql = "SELECT version FROM schema_version LIMIT 1;";
-    sqlite3_stmt* stmt = nullptr;
-    int result = sqlite3_prepare_v2(handle, sql, -1, &stmt, nullptr);
+void ensureSchemaVersionTable(sqlite3* handle) {
+    char* errorMessage = nullptr;
+    int result = sqlite3_exec(handle, kCreateSchemaVersion, nullptr, nullptr, &errorMessage);
     if (result != SQLITE_OK) {
-        return 0;
+        std::string error = errorMessage ? errorMessage : "Unknown error";
+        sqlite3_free(errorMessage);
+        throw std::runtime_error("Failed to create schema_version table: " + error);
     }
-    int version = 0;
-    if (sqlite3_step(stmt) == SQLITE_ROW) {
-        version = sqlite3_column_int(stmt, 0);
-    }
-    sqlite3_finalize(stmt);
-    return version;
 }
 
 void setSchemaVersion(sqlite3* handle, int version) {
-    // Clear existing version and insert new one
     const char* deleteSql = "DELETE FROM schema_version;";
     sqlite3_exec(handle, deleteSql, nullptr, nullptr, nullptr);
 
@@ -136,79 +148,26 @@ void setSchemaVersion(sqlite3* handle, int version) {
     }
 }
 
-bool columnExists(sqlite3* handle, const char* table, const char* column) {
-    std::string sql = "PRAGMA table_info(" + std::string(table) + ");";
-    sqlite3_stmt* stmt = nullptr;
-    int result = sqlite3_prepare_v2(handle, sql.c_str(), -1, &stmt, nullptr);
-    if (result != SQLITE_OK) {
-        return false;
-    }
-    bool found = false;
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        const unsigned char* colName = sqlite3_column_text(stmt, 1);
-        if (colName && std::string(reinterpret_cast<const char*>(colName)) == column) {
-            found = true;
-            break;
-        }
-    }
-    sqlite3_finalize(stmt);
-    return found;
-}
-
-void ensureSchemaVersionTable(sqlite3* handle) {
+void executeSql(sqlite3* handle, const char* sql, const std::string& label) {
     char* errorMessage = nullptr;
-    int result = sqlite3_exec(handle, kCreateSchemaVersion, nullptr, nullptr, &errorMessage);
+    int result = sqlite3_exec(handle, sql, nullptr, nullptr, &errorMessage);
     if (result != SQLITE_OK) {
         std::string error = errorMessage ? errorMessage : "Unknown error";
         sqlite3_free(errorMessage);
-        throw std::runtime_error("Failed to create schema_version table: " + error);
+        throw std::runtime_error("Failed to " + label + ": " + error);
     }
 }
 
 void createTables(sqlite3* handle) {
-    char* errorMessage = nullptr;
-    int result = sqlite3_exec(handle, kCreateProjectsTable, nullptr, nullptr, &errorMessage);
-    if (result != SQLITE_OK) {
-        std::string error = errorMessage ? errorMessage : "Unknown error";
-        sqlite3_free(errorMessage);
-        throw std::runtime_error("Failed to create projects table: " + error);
-    }
-
-    result = sqlite3_exec(handle, kCreateFeedsTable, nullptr, nullptr, &errorMessage);
-    if (result != SQLITE_OK) {
-        std::string error = errorMessage ? errorMessage : "Unknown error";
-        sqlite3_free(errorMessage);
-        throw std::runtime_error("Failed to create feeds table: " + error);
-    }
-
-    result = sqlite3_exec(handle, kCreateScenesTable, nullptr, nullptr, &errorMessage);
-    if (result != SQLITE_OK) {
-        std::string error = errorMessage ? errorMessage : "Unknown error";
-        sqlite3_free(errorMessage);
-        throw std::runtime_error("Failed to create scenes table: " + error);
-    }
-
-    result = sqlite3_exec(handle, kCreateSurfacesTable, nullptr, nullptr, &errorMessage);
-    if (result != SQLITE_OK) {
-        std::string error = errorMessage ? errorMessage : "Unknown error";
-        sqlite3_free(errorMessage);
-        throw std::runtime_error("Failed to create surfaces table: " + error);
-    }
-
-    result = sqlite3_exec(handle, kCreateCuesTable, nullptr, nullptr, &errorMessage);
-    if (result != SQLITE_OK) {
-        std::string error = errorMessage ? errorMessage : "Unknown error";
-        sqlite3_free(errorMessage);
-        throw std::runtime_error("Failed to create cues table: " + error);
-    }
-
-    result = sqlite3_exec(handle, kCreateProjectCuesTable, nullptr, nullptr, &errorMessage);
-    if (result != SQLITE_OK) {
-        std::string error = errorMessage ? errorMessage : "Unknown error";
-        sqlite3_free(errorMessage);
-        throw std::runtime_error("Failed to create project_cues table: " + error);
-    }
+    executeSql(handle, kCreateProjectsTable, "create projects table");
+    executeSql(handle, kCreateAssetsTable, "create assets table");
+    executeSql(handle, kCreateProjectAssetsTable, "create project_assets table");
+    executeSql(handle, kCreateFeedsTable, "create feeds table");
+    executeSql(handle, kCreateScenesTable, "create scenes table");
+    executeSql(handle, kCreateSurfacesTable, "create surfaces table");
+    executeSql(handle, kCreateCuesTable, "create cues table");
 }
+
 }  // namespace
 
 void SchemaMigrations::applyMigrations(SqliteConnection& connection) {
@@ -219,40 +178,11 @@ void SchemaMigrations::applyMigrations(SqliteConnection& connection) {
     }
 
     ensureSchemaVersionTable(handle);
+
+    // No backwards compatibility required. Start from a clean schema.
+    executeSql(handle, kDropOldTables, "drop existing tables");
     createTables(handle);
-
-    // Apply incremental migrations based on schema version
-    int currentVersion = getSchemaVersion(handle);
-
-    // Migration 1: Add rotation column to surfaces table
-    if (currentVersion < 1) {
-        // Only run ALTER if column doesn't already exist (for safety)
-        if (!columnExists(handle, "surfaces", "rotation")) {
-            char* errorMessage = nullptr;
-            int result = sqlite3_exec(handle, kMigrationAddRotationColumn, nullptr, nullptr, &errorMessage);
-            if (result != SQLITE_OK) {
-                std::string error = errorMessage ? errorMessage : "Unknown error";
-                sqlite3_free(errorMessage);
-                throw std::runtime_error("Failed to add rotation column: " + error);
-            }
-        }
-        setSchemaVersion(handle, 1);
-        currentVersion = 1;
-    }
-
-    // Migration 2: Add settings_json column to scenes table
-    if (currentVersion < 2) {
-        if (!columnExists(handle, "scenes", "settings_json")) {
-            char* errorMessage = nullptr;
-            int result = sqlite3_exec(handle, kMigrationAddSceneSettingsColumn, nullptr, nullptr, &errorMessage);
-            if (result != SQLITE_OK) {
-                std::string error = errorMessage ? errorMessage : "Unknown error";
-                sqlite3_free(errorMessage);
-                throw std::runtime_error("Failed to add settings_json column to scenes: " + error);
-            }
-        }
-        setSchemaVersion(handle, 2);
-    }
+    setSchemaVersion(handle, 1);
 }
 
 }  // namespace projection::server::db

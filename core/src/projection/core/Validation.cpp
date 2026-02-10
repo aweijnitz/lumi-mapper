@@ -73,7 +73,9 @@ bool validateCueForScene(const Cue& cue, const Scene& scene, std::string& errorM
   return true;
 }
 
-bool validateProjectCues(const Project& project, const std::vector<Cue>& cues, std::string& errorMessage) {
+bool validateProjectCues(const Project& project, const std::vector<Asset>& assets, const std::vector<Feed>& feeds,
+                         const std::vector<Scene>& scenes, const std::vector<Cue>& cues,
+                         std::string& errorMessage) {
   if (project.getId().value.empty()) {
     errorMessage = "Project id must not be empty.";
     return false;
@@ -82,6 +84,56 @@ bool validateProjectCues(const Project& project, const std::vector<Cue>& cues, s
   if (project.getName().empty()) {
     errorMessage = "Project name must not be empty.";
     return false;
+  }
+
+  if (project.getCreatedAt().empty() || project.getUpdatedAt().empty()) {
+    errorMessage = "Project '" + project.getId().value + "' must include createdAt and updatedAt timestamps.";
+    return false;
+  }
+
+  std::unordered_map<std::string, const Asset*> assetById;
+  for (const auto& asset : assets) {
+    assetById.emplace(asset.getId().value, &asset);
+  }
+  for (const auto& assetId : project.getAssetIds()) {
+    if (assetById.find(assetId.value) == assetById.end()) {
+      errorMessage = "Project '" + project.getId().value + "' references missing asset '" + assetId.value + "'.";
+      return false;
+    }
+  }
+
+  std::unordered_map<std::string, const Feed*> feedById;
+  for (const auto& feed : feeds) {
+    feedById.emplace(feed.getId().value, &feed);
+  }
+  for (const auto& feedId : project.getFeedIds()) {
+    auto feedIt = feedById.find(feedId.value);
+    if (feedIt == feedById.end()) {
+      errorMessage = "Project '" + project.getId().value + "' references missing feed '" + feedId.value + "'.";
+      return false;
+    }
+    if (feedIt->second->getProjectId() != project.getId()) {
+      errorMessage = "Project '" + project.getId().value + "' references feed '" + feedId.value +
+                     "' with mismatched project id.";
+      return false;
+    }
+  }
+
+  std::unordered_map<std::string, const Scene*> sceneById;
+  for (const auto& scene : scenes) {
+    sceneById.emplace(scene.getId().value, &scene);
+  }
+  for (const auto& sceneId : project.getSceneIds()) {
+    auto sceneIt = sceneById.find(sceneId.value);
+    if (sceneIt == sceneById.end()) {
+      errorMessage = "Project '" + project.getId().value + "' references missing scene '" + sceneId.value + "'.";
+      return false;
+    }
+    if (sceneIt->second->getProjectId() != project.getId()) {
+      errorMessage = "Project '" + project.getId().value + "' references scene '" + sceneId.value +
+                     "' with mismatched project id.";
+      return false;
+    }
   }
 
   std::unordered_map<std::string, const Cue*> cueById;

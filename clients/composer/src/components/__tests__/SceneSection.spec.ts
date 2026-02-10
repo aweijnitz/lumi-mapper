@@ -53,6 +53,11 @@ describe("SceneSection", () => {
       id: "project-1",
       name: "Project",
       description: "",
+      createdAt: "2026-02-02T10:00:00Z",
+      updatedAt: "2026-02-02T10:00:00Z",
+      assetIds: [],
+      sceneIds: [],
+      feedIds: [],
       cueOrder: ["cue-1"],
       settings: { controllers: {}, midiChannels: [], globalConfig: {} },
     };
@@ -114,6 +119,11 @@ describe("SceneSection", () => {
       id: "project-1",
       name: "Project",
       description: "",
+      createdAt: "2026-02-02T10:00:00Z",
+      updatedAt: "2026-02-02T10:00:00Z",
+      assetIds: [],
+      sceneIds: ["scene-1", "scene-2"],
+      feedIds: [],
       cueOrder: [],
       settings: { controllers: {}, midiChannels: [], globalConfig: {} },
     };

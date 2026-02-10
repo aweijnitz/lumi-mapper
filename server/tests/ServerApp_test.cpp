@@ -35,6 +35,25 @@ int reservePort() {
     return port;
 }
 
+bool waitForPort(int port) {
+    for (int attempt = 0; attempt < 200; ++attempt) {
+        int sock = ::socket(AF_INET, SOCK_STREAM, 0);
+        if (sock >= 0) {
+            sockaddr_in addr{};
+            addr.sin_family = AF_INET;
+            addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+            addr.sin_port = htons(static_cast<uint16_t>(port));
+            if (::connect(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0) {
+                ::close(sock);
+                return true;
+            }
+            ::close(sock);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    return false;
+}
+
 }  // namespace
 
 TEST_CASE("ServerApp constructs with configuration", "[server][app]") {
@@ -58,10 +77,11 @@ TEST_CASE("ServerApp run returns status code", "[server][app]") {
 
     int status = -1;
     std::thread serverThread([&] { status = app.run(); });
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    const bool started = waitForPort(httpPort);
     app.stop();
     serverThread.join();
 
+    REQUIRE(started);
     REQUIRE(status == 0);
 }
 

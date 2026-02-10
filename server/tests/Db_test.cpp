@@ -33,7 +33,7 @@ TEST_CASE("SqliteConnection opens and closes database", "[db][sqlite]") {
     REQUIRE(connection.getHandle() != nullptr);
 }
 
-TEST_CASE("SchemaMigrations creates feeds and scenes tables", "[db][migrations]") {
+TEST_CASE("SchemaMigrations creates core tables", "[db][migrations]") {
     auto dbPath = createTempDbPath("projection_mapper_migrations.sqlite");
     std::filesystem::remove(dbPath);
 
@@ -54,23 +54,36 @@ TEST_CASE("SchemaMigrations creates feeds and scenes tables", "[db][migrations]"
     char* errorMessage = nullptr;
     int result = sqlite3_exec(
         handle,
-        "INSERT INTO projects(id, name, description, settings_json) "
-        "VALUES('proj-1', 'Project', 'desc', '{}');",
+        "INSERT INTO projects(id, name, description, created_at, updated_at, asset_ids_json, scene_ids_json, "
+        "feed_ids_json, cue_order_json, settings_json) "
+        "VALUES('proj-1', 'Project', 'desc', '2026-02-02T10:00:00Z', '2026-02-02T10:00:00Z', '[]', '[]', '[]', '[]', '{}');",
         nullptr, nullptr, &errorMessage);
     sqlite3_free(errorMessage);
     REQUIRE(result == SQLITE_OK);
 
-    result =
-        sqlite3_exec(handle,
-                     "INSERT INTO feeds(project_id, id, name, type, config_json) "
-                     "VALUES('proj-1', 'feed-1', 'feed1', 'VideoFile', '{}');",
-                     nullptr, nullptr, &errorMessage);
+    result = sqlite3_exec(handle,
+                          "INSERT INTO assets(id, name, type, path, variants_json) "
+                          "VALUES('asset-1', 'Clip', 'VideoFile', '/media/clip.mp4', '[]');",
+                          nullptr, nullptr, &errorMessage);
     sqlite3_free(errorMessage);
     REQUIRE(result == SQLITE_OK);
 
     result = sqlite3_exec(handle,
-                          "INSERT INTO scenes(project_id, id, name, description) "
-                          "VALUES('proj-1', 'scene-1', 'scene1', 'desc');",
+                          "INSERT INTO project_assets(project_id, asset_id) VALUES('proj-1', 'asset-1');",
+                          nullptr, nullptr, &errorMessage);
+    sqlite3_free(errorMessage);
+    REQUIRE(result == SQLITE_OK);
+
+    result = sqlite3_exec(handle,
+                          "INSERT INTO feeds(project_id, id, name, asset_id, settings_json) "
+                          "VALUES('proj-1', 'feed-1', 'feed1', 'asset-1', '{}');",
+                          nullptr, nullptr, &errorMessage);
+    sqlite3_free(errorMessage);
+    REQUIRE(result == SQLITE_OK);
+
+    result = sqlite3_exec(handle,
+                          "INSERT INTO scenes(project_id, id, name, description, settings_json) "
+                          "VALUES('proj-1', 'scene-1', 'scene1', 'desc', '{}');",
                           nullptr, nullptr, &errorMessage);
     sqlite3_free(errorMessage);
     REQUIRE(result == SQLITE_OK);
@@ -82,19 +95,12 @@ TEST_CASE("SchemaMigrations creates feeds and scenes tables", "[db][migrations]"
     sqlite3_free(errorMessage);
     REQUIRE(result == SQLITE_OK);
 
-    result = sqlite3_exec(handle,
-                          "INSERT INTO project_cues(project_id, cue_id, position) VALUES('proj-1', 'cue-1', 0);",
-                          nullptr, nullptr, &errorMessage);
-    sqlite3_free(errorMessage);
-    REQUIRE(result == SQLITE_OK);
-
     bool sawFeed = false;
-    auto feedCallback = [](void* data, int argc, char** argv, char** colNames) -> int {
+    auto feedCallback = [](void* data, int argc, char** argv, char**) -> int {
         bool* found = static_cast<bool*>(data);
         if (argc > 0 && argv[0] != nullptr) {
             *found = true;
         }
-        (void)colNames;
         return 0;
     };
 
@@ -104,12 +110,11 @@ TEST_CASE("SchemaMigrations creates feeds and scenes tables", "[db][migrations]"
     REQUIRE(sawFeed);
 
     bool sawScene = false;
-    auto sceneCallback = [](void* data, int argc, char** argv, char** colNames) -> int {
+    auto sceneCallback = [](void* data, int argc, char** argv, char**) -> int {
         bool* found = static_cast<bool*>(data);
         if (argc > 0 && argv[0] != nullptr) {
             *found = true;
         }
-        (void)colNames;
         return 0;
     };
 
@@ -118,3 +123,4 @@ TEST_CASE("SchemaMigrations creates feeds and scenes tables", "[db][migrations]"
     REQUIRE(result == SQLITE_OK);
     REQUIRE(sawScene);
 }
+

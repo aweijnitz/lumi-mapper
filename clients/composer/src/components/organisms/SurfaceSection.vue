@@ -61,6 +61,7 @@ const createSurface = async () => {
     brightness: 1,
     blendMode: "Normal",
     zOrder: 0,
+    rotation: 0,
   };
 
   const nextScene = {

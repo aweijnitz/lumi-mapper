@@ -44,8 +44,8 @@ TEST_CASE("Scene findSurface returns matching surfaces", "[scene]") {
 }
 
 TEST_CASE("Scene consistency validates surfaces and feed references", "[scene]") {
-  Feed feed1{makeProjectId("project-1"), makeFeedId("feed-1"), "Camera", FeedType::Camera, "{}"};
-  Feed feed2{makeProjectId("project-1"), makeFeedId("feed-2"), "Video", FeedType::VideoFile, "{}"};
+  Feed feed1{makeProjectId("project-1"), makeFeedId("feed-1"), "Feed A", makeAssetId("asset-1")};
+  Feed feed2{makeProjectId("project-1"), makeFeedId("feed-2"), "Feed B", makeAssetId("asset-2")};
 
   std::vector<Vec2> quad{{0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f}};
   Surface surfaceGood{makeSurfaceId("A"), "A", quad, feed1.getId()};

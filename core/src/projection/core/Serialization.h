@@ -5,6 +5,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "projection/core/Asset.h"
 #include "projection/core/Cue.h"
 #include "projection/core/Enums.h"
 #include "projection/core/Feed.h"
@@ -19,14 +20,20 @@ namespace projection::core {
 // Error handling strategy: deserialization functions throw std::runtime_error when JSON is
 // missing required fields, has the wrong type, or contains invalid enum strings.
 
-void to_json(nlohmann::json& j, const FeedType& type);
-void from_json(const nlohmann::json& j, FeedType& type);
+void to_json(nlohmann::json& j, const AssetType& type);
+void from_json(const nlohmann::json& j, AssetType& type);
 
 void to_json(nlohmann::json& j, const BlendMode& mode);
 void from_json(const nlohmann::json& j, BlendMode& mode);
 
-void to_json(nlohmann::json& j, const VideoFileConfig& config);
-void from_json(const nlohmann::json& j, VideoFileConfig& config);
+void to_json(nlohmann::json& j, const AssetVariant& variant);
+void from_json(const nlohmann::json& j, AssetVariant& variant);
+
+void to_json(nlohmann::json& j, const Asset& asset);
+void from_json(const nlohmann::json& j, Asset& asset);
+
+void to_json(nlohmann::json& j, const FeedSettings& settings);
+void from_json(const nlohmann::json& j, FeedSettings& settings);
 
 void to_json(nlohmann::json& j, const Vec2& vec);
 void from_json(const nlohmann::json& j, Vec2& vec);

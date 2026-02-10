@@ -43,7 +43,16 @@ TEST_CASE("ProjectRepository persists and retrieves ordered cues", "[repo][proje
     ProjectSettings settings;
     settings.midiChannels = {1};
     settings.controllers["fader1"] = "master";
-    Project project{makeProjectId("proj-1"), "Show", "Demo", {}, settings};
+    Project project{makeProjectId("proj-1"),
+                    "Show",
+                    "Demo",
+                    "2026-02-02T10:00:00Z",
+                    "2026-02-02T10:00:00Z",
+                    {},
+                    {},
+                    {},
+                    {},
+                    settings};
     projectRepo.createProject(project);
 
     Scene scene{project.getId(), makeSceneId("1"), "Scene", "desc", {}};
@@ -87,8 +96,10 @@ TEST_CASE("ProjectRepository tolerates empty settings_json values", "[repo][proj
     connection.open(dbPath.string());
     SchemaMigrations::applyMigrations(connection);
 
-    connection.execute("INSERT INTO projects(id, name, description, settings_json) "
-                       "VALUES('proj-empty', 'Empty', 'No settings', '');");
+    connection.execute(
+        "INSERT INTO projects(id, name, description, created_at, updated_at, asset_ids_json, scene_ids_json, "
+        "feed_ids_json, cue_order_json, settings_json) VALUES('proj-empty', 'Empty', 'No settings', "
+        "'2026-02-02T10:00:00Z', '2026-02-02T10:00:00Z', '[]', '[]', '[]', '[]', '');");
 
     ProjectRepository projectRepo(connection);
     auto projects = projectRepo.listProjects();
@@ -103,3 +114,4 @@ TEST_CASE("ProjectRepository tolerates empty settings_json values", "[repo][proj
     REQUIRE(fetched->getSettings().midiChannels.empty());
     REQUIRE(fetched->getSettings().globalConfig.empty());
 }
+

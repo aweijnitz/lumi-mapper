@@ -121,10 +121,6 @@ Assets:
 - `POST /assets` (multipart upload field name `file`, 2GB max)
 - `DELETE /assets/{name}`
 
-Demo helpers:
-- `POST /demo/two-video-test`
-- `POST /demo/clear-projects`
-
 ---
 
 ## Tests

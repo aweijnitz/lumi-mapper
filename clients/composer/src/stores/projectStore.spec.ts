@@ -16,6 +16,11 @@ const baseProject: Project = {
   id: "project-1",
   name: "Project One",
   description: "Desc",
+  createdAt: "2026-02-02T10:00:00Z",
+  updatedAt: "2026-02-02T10:00:00Z",
+  assetIds: [],
+  sceneIds: [],
+  feedIds: [],
   cueOrder: [],
   settings: {
     controllers: {},

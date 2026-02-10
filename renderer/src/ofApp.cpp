@@ -542,9 +542,11 @@ void ofApp::processMessage(const projection::core::RendererMessage& message) {
     case RendererMessageType::LoadSceneDefinition:
       if (verbose_) {
         std::cerr << "[renderer] LoadSceneDefinition with scene " << message.loadSceneDefinition->scene.getId().value
-                  << " feeds=" << message.loadSceneDefinition->feeds.size() << std::endl;
+                  << " feeds=" << message.loadSceneDefinition->feeds.size()
+                  << " assets=" << message.loadSceneDefinition->assets.size() << std::endl;
       }
-      renderState_.loadSceneDefinition(message.loadSceneDefinition->scene, message.loadSceneDefinition->feeds);
+      renderState_.loadSceneDefinition(message.loadSceneDefinition->scene, message.loadSceneDefinition->feeds,
+                                       message.loadSceneDefinition->assets);
       {
         std::lock_guard<std::mutex> lock(stateMutex_);
         sceneId_ = message.loadSceneDefinition->scene.getId().value;

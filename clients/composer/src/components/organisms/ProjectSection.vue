@@ -57,6 +57,11 @@ const createProject = async () => {
     id: createId("project"),
     name: name.value.trim(),
     description: description.value.trim(),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    assetIds: [],
+    sceneIds: [],
+    feedIds: [],
     cueOrder: [],
     settings: {
       controllers: {},

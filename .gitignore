@@ -1,6 +1,8 @@
 .DS_Store
 data/db
 build/
+build_full/
+build-renderer/
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake

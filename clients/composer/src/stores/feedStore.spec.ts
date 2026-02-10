@@ -16,8 +16,8 @@ const baseFeed: Feed = {
   projectId: "project-1",
   id: "feed-1",
   name: "Feed",
-  type: "VideoFile",
-  configJson: { filePath: "/tmp/clip.mp4" },
+  assetId: "asset-1",
+  settings: { variantPath: "/tmp/clip.mp4" },
 };
 
 beforeEach(() => {
