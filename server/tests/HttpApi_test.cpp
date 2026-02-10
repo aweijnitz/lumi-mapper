@@ -261,6 +261,36 @@ TEST_CASE("HTTP API can create and list feeds", "[http][integration]") {
     std::filesystem::remove(dbPath);
 }
 
+TEST_CASE("HTTP API defaults missing project timestamps and lists", "[http][integration]") {
+    auto dbPath = tempDbPath("http_api_project_defaults.db");
+    TestServerContext ctx(dbPath);
+    const auto port = reservePort();
+    ServerRunner runner(ctx.httpServer, port);
+
+    auto client = makeClient(port);
+    REQUIRE(waitForServer(*client, ctx.httpServer, runner));
+
+    nlohmann::json project{{"id", "project-defaults"},
+                           {"name", "Project defaults"},
+                           {"description", "created without optional metadata"}};
+    auto createRes = client->Post("/api/projects", project.dump(), "application/json");
+    REQUIRE(createRes != nullptr);
+    REQUIRE(createRes->status == 201);
+
+    auto created = nlohmann::json::parse(createRes->body);
+    REQUIRE(created["createdAt"].is_string());
+    REQUIRE(!created["createdAt"].get<std::string>().empty());
+    REQUIRE(created["updatedAt"].is_string());
+    REQUIRE(!created["updatedAt"].get<std::string>().empty());
+    REQUIRE(created["assetIds"].is_array());
+    REQUIRE(created["sceneIds"].is_array());
+    REQUIRE(created["feedIds"].is_array());
+    REQUIRE(created["cueOrder"].is_array());
+    REQUIRE(created["settings"].is_object());
+
+    std::filesystem::remove(dbPath);
+}
+
 TEST_CASE("HTTP API can create and list scenes", "[http][integration]") {
     auto dbPath = tempDbPath("http_api_scenes.db");
     TestServerContext ctx(dbPath);

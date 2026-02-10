@@ -90,6 +90,44 @@ std::string nowIso8601Utc() {
     out << std::put_time(&utc, "%Y-%m-%dT%H:%M:%SZ");
     return out.str();
 }
+
+void normalizeProjectJsonDefaults(json& body) {
+    if (!body.is_object()) {
+        throw std::runtime_error("Project must be an object");
+    }
+
+    const auto now = nowIso8601Utc();
+    if (!body.contains("createdAt") || body["createdAt"].is_null()) {
+        body["createdAt"] = now;
+    }
+    if (!body.contains("updatedAt") || body["updatedAt"].is_null()) {
+        body["updatedAt"] = now;
+    }
+
+    for (const auto* field : {"assetIds", "sceneIds", "feedIds", "cueOrder"}) {
+        if (!body.contains(field) || body[field].is_null()) {
+            body[field] = json::array();
+        }
+    }
+
+    if (!body.contains("settings") || body["settings"].is_null()) {
+        body["settings"] = json::object();
+    }
+    if (!body["settings"].is_object()) {
+        throw std::runtime_error("Field 'settings' must be an object");
+    }
+
+    auto& settings = body["settings"];
+    if (!settings.contains("controllers") || settings["controllers"].is_null()) {
+        settings["controllers"] = json::object();
+    }
+    if (!settings.contains("midiChannels") || settings["midiChannels"].is_null()) {
+        settings["midiChannels"] = json::array();
+    }
+    if (!settings.contains("globalConfig") || settings["globalConfig"].is_null()) {
+        settings["globalConfig"] = json::object();
+    }
+}
 }  // namespace
 
 HttpServer::HttpServer(repo::AssetRepository& assetRepository, repo::FeedRepository& feedRepository,
@@ -653,6 +691,7 @@ void HttpServer::registerRoutes() {
     registerPost("/projects", [this, log](const ::httplib::Request& req, ::httplib::Response& res) {
         try {
             auto body = json::parse(req.body);
+            normalizeProjectJsonDefaults(body);
             auto project = body.get<core::Project>();
             log("Received project create id=" + project.getId().value + " name=" + project.getName() +
                 " cueCount=" + std::to_string(project.getCueOrder().size()));
@@ -681,6 +720,7 @@ void HttpServer::registerRoutes() {
                 return;
             }
             auto body = json::parse(req.body);
+            normalizeProjectJsonDefaults(body);
             auto project = body.get<core::Project>();
             project.setId(core::ProjectId{req.matches[1]});
             log("Received project update id=" + project.getId().value + " name=" + project.getName() +

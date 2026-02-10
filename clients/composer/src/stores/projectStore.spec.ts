@@ -52,3 +52,45 @@ it("createProject sets activeProject", async () => {
   expect(store.activeProject?.id).toBe("project-1");
   expect(store.projects).toHaveLength(1);
 });
+
+it("createProject normalizes payload defaults for API", async () => {
+  const fetchSpy = vi.fn().mockResolvedValue({
+    ok: true,
+    status: 201,
+    text: vi.fn().mockResolvedValue(JSON.stringify(baseProject)),
+    json: vi.fn().mockResolvedValue(baseProject),
+  });
+  globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+  const store = useProjectStore();
+  await store.createProject({
+    id: "project-2",
+    name: "Project Two",
+    description: "Desc",
+    createdAt: "",
+    updatedAt: "",
+    cueOrder: [],
+    settings: {
+      controllers: {},
+      midiChannels: [],
+      globalConfig: {},
+    },
+  });
+
+  expect(fetchSpy).toHaveBeenCalledTimes(1);
+  const [, options] = fetchSpy.mock.calls[0] as [string, RequestInit];
+  const body = JSON.parse(String(options.body));
+  expect(Array.isArray(body.assetIds)).toBe(true);
+  expect(Array.isArray(body.sceneIds)).toBe(true);
+  expect(Array.isArray(body.feedIds)).toBe(true);
+  expect(Array.isArray(body.cueOrder)).toBe(true);
+  expect(typeof body.createdAt).toBe("string");
+  expect(body.createdAt.length).toBeGreaterThan(0);
+  expect(typeof body.updatedAt).toBe("string");
+  expect(body.updatedAt.length).toBeGreaterThan(0);
+  expect(body.settings).toEqual({
+    controllers: {},
+    midiChannels: [],
+    globalConfig: {},
+  });
+});

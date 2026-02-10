@@ -128,10 +128,16 @@ const handleSaveProject = async () => {
 };
 
 const createProject = async () => {
+  const now = new Date().toISOString();
   const payload: Project = {
     id: createId("project"),
     name: newProjectName.value.trim(),
     description: newProjectDescription.value.trim(),
+    createdAt: now,
+    updatedAt: now,
+    assetIds: [],
+    sceneIds: [],
+    feedIds: [],
     cueOrder: [],
     settings: {
       controllers: {},

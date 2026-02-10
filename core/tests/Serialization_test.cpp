@@ -193,14 +193,23 @@ TEST_CASE("Missing required fields throw", "[serialization][negative]") {
   expectRuntimeError([&]() { missingId.get<Feed>(); });
 
   json missingProjectFields = {{"id", "proj-1"},
-                               {"name", "Bad"},
-                               {"description", "desc"},
-                               {"createdAt", "2026-02-02T10:00:00Z"},
-                               {"updatedAt", "2026-02-02T10:10:00Z"},
-                               {"assetIds", json::array()},
-                               {"sceneIds", json::array()},
-                               {"feedIds", json::array()}};
+                               {"name", "Bad"}};
   expectRuntimeError([&]() { missingProjectFields.get<Project>(); });
+}
+
+TEST_CASE("Project deserialization tolerates missing optional metadata fields", "[serialization]") {
+  json minimalProject = {{"id", "proj-1"},
+                         {"name", "Minimal"},
+                         {"description", "desc"},
+                         {"cueOrder", json::array()}};
+
+  auto parsed = minimalProject.get<Project>();
+  REQUIRE(parsed.getCreatedAt().empty());
+  REQUIRE(parsed.getUpdatedAt().empty());
+  REQUIRE(parsed.getAssetIds().empty());
+  REQUIRE(parsed.getSceneIds().empty());
+  REQUIRE(parsed.getFeedIds().empty());
+  REQUIRE(parsed.getCueOrder().empty());
 }
 
 TEST_CASE("Type mismatches throw", "[serialization][negative]") {

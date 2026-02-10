@@ -492,13 +492,35 @@ void from_json(const json& j, Project& project) {
   const auto id = requireString(j, "id");
   const auto name = requireString(j, "name");
   const auto description = requireString(j, "description");
-  const auto createdAt = requireString(j, "createdAt");
-  const auto updatedAt = requireString(j, "updatedAt");
+  std::string createdAt;
+  if (j.contains("createdAt") && !j.at("createdAt").is_null()) {
+    createdAt = requireString(j, "createdAt");
+  }
 
-  const auto assetIds = readStringArray(requireField<json>(j, "assetIds"), "assetIds");
-  const auto sceneIds = readStringArray(requireField<json>(j, "sceneIds"), "sceneIds");
-  const auto feedIds = readStringArray(requireField<json>(j, "feedIds"), "feedIds");
-  const auto cueOrder = readStringArray(requireField<json>(j, "cueOrder"), "cueOrder");
+  std::string updatedAt;
+  if (j.contains("updatedAt") && !j.at("updatedAt").is_null()) {
+    updatedAt = requireString(j, "updatedAt");
+  }
+
+  std::vector<std::string> assetIds;
+  if (j.contains("assetIds") && !j.at("assetIds").is_null()) {
+    assetIds = readStringArray(j.at("assetIds"), "assetIds");
+  }
+
+  std::vector<std::string> sceneIds;
+  if (j.contains("sceneIds") && !j.at("sceneIds").is_null()) {
+    sceneIds = readStringArray(j.at("sceneIds"), "sceneIds");
+  }
+
+  std::vector<std::string> feedIds;
+  if (j.contains("feedIds") && !j.at("feedIds").is_null()) {
+    feedIds = readStringArray(j.at("feedIds"), "feedIds");
+  }
+
+  std::vector<std::string> cueOrder;
+  if (j.contains("cueOrder") && !j.at("cueOrder").is_null()) {
+    cueOrder = readStringArray(j.at("cueOrder"), "cueOrder");
+  }
 
   ProjectSettings settings{};
   if (j.contains("settings")) {
@@ -534,4 +556,3 @@ void from_json(const json& j, Project& project) {
 }
 
 }  // namespace projection::core
-
