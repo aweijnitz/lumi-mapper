@@ -251,6 +251,7 @@ npm run build
 Example API calls (HTTP+JSON):
 
 ```bash
+# The server accepts both `/api/...` and root-level `/...` paths.
 curl http://localhost:8080/api/renderer/ping
 
 curl -X POST http://localhost:8080/api/projects \
@@ -274,6 +275,12 @@ curl -X POST http://localhost:8080/api/projects/project-1/scenes \
   -d '{"projectId":"project-1","id":"scene-1","name":"Main","description":"Example scene","surfaces":[],"settings":{"filter":"none","colorPaletteIndex":0}}'
 
 curl http://localhost:8080/api/projects/project-1/scenes
+
+curl http://localhost:8080/api/projects/project-1/scenes/scene-1
+
+curl http://localhost:8080/api/projects/project-1/cues
+
+curl -X DELETE http://localhost:8080/api/assets/asset-1
 ```
 
 ### Renderer integration

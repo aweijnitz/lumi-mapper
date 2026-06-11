@@ -95,6 +95,10 @@ Project CRUD:
 - `DELETE /projects/{id}`
 
 Project-scoped entities:
+- `GET /projects/{projectId}/assets`
+- `POST /projects/{projectId}/assets`
+- `POST /projects/{projectId}/assets/{assetId}`
+- `DELETE /projects/{projectId}/assets/{assetId}`
 - `GET /projects/{projectId}/feeds`
 - `POST /projects/{projectId}/feeds`
 - `PUT /projects/{projectId}/feeds/{feedId}`
@@ -117,9 +121,9 @@ Renderer control:
 - `POST /renderer/crosshair` (show/hide crosshair overlay)
 
 Assets:
-- `GET /assets` (lists assets under `./data/assets`, `../data/assets`, or `../../data/assets`)
+- `GET /assets` (lists asset records)
 - `POST /assets` (multipart upload field name `file`, 2GB max)
-- `DELETE /assets/{name}`
+- `DELETE /assets/{assetId}`
 
 ---
 

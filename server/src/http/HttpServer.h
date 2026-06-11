@@ -2,6 +2,7 @@
 
 #include <httplib.h>
 #include <memory>
+#include <string>
 
 #include "repo/FeedRepository.h"
 #include "repo/AssetRepository.h"

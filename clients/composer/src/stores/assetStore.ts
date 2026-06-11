@@ -1,6 +1,11 @@
 import { defineStore } from "pinia";
 import type { Asset } from "../types/asset";
-import { requestFormData, requestJson, resolveErrorMessage } from "../composables/useApiClient";
+import { requestFormData, requestJson } from "../composables/useApiClient";
+import {
+  clearActiveEntity,
+  removeEntity,
+  runStoreRequest,
+} from "../composables/useStoreCrud";
 
 export const useAssetStore = defineStore("assets", {
   state: () => ({
@@ -11,52 +16,43 @@ export const useAssetStore = defineStore("assets", {
   }),
   actions: {
     async fetchAssets() {
-      this.isLoading = true;
-      this.error = null;
-      try {
+      const assets = await runStoreRequest(this, "Failed to load assets.", async () => {
         const assets = await requestJson<Asset[]>("/api/assets", { method: "GET" });
-        this.assets = assets ?? [];
-      } catch (error) {
-        this.error = resolveErrorMessage(error, "Failed to load assets.");
-      } finally {
-        this.isLoading = false;
+        return assets ?? [];
+      });
+      if (assets !== undefined) {
+        this.assets = assets;
       }
     },
     async uploadAsset(file: File) {
-      this.isLoading = true;
-      this.error = null;
-      try {
-        const formData = new FormData();
-        formData.append("file", file);
-        await requestFormData("/api/assets", {
-          method: "POST",
-          body: formData,
-        });
-        await this.fetchAssets();
-      } catch (error) {
-        this.error = resolveErrorMessage(error, "Failed to upload asset.");
-        throw error;
-      } finally {
-        this.isLoading = false;
-      }
+      await runStoreRequest(
+        this,
+        "Failed to upload asset.",
+        async () => {
+          const formData = new FormData();
+          formData.append("file", file);
+          await requestFormData("/api/assets", {
+            method: "POST",
+            body: formData,
+          });
+          await this.fetchAssets();
+        },
+        { rethrow: true },
+      );
     },
     async deleteAsset(assetId: string) {
-      this.isLoading = true;
-      this.error = null;
-      try {
-        await requestJson(`/api/assets/${assetId}`, {
-          method: "DELETE",
-        });
-        this.assets = this.assets.filter((asset) => asset.id !== assetId);
-        if (this.activeAsset?.id === assetId) {
-          this.activeAsset = null;
-        }
-      } catch (error) {
-        this.error = resolveErrorMessage(error, "Failed to delete asset.");
-        throw error;
-      } finally {
-        this.isLoading = false;
-      }
+      await runStoreRequest(
+        this,
+        "Failed to delete asset.",
+        async () => {
+          await requestJson(`/api/assets/${assetId}`, {
+            method: "DELETE",
+          });
+          this.assets = removeEntity(this.assets, assetId);
+          this.activeAsset = clearActiveEntity(this.activeAsset, assetId);
+        },
+        { rethrow: true },
+      );
     },
     setActiveAsset(asset: Asset | null) {
       this.activeAsset = asset;

@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
-import { requestJson, resolveErrorMessage } from "../composables/useApiClient";
+import { requestJson } from "../composables/useApiClient";
+import { runStoreRequest } from "../composables/useStoreCrud";
 
 export type RendererInfo = {
   name: string;
@@ -24,66 +25,57 @@ export const useRendererStore = defineStore("renderer", {
   },
   actions: {
     async ping() {
-      this.isLoading = true;
-      this.error = null;
-      try {
+      const status = await runStoreRequest(this, "Renderer not available.", async () => {
         const status = await requestJson<RendererStatus>("/api/renderer/ping", {
           method: "GET",
           cache: "no-store",
         });
-        this.lastStatus = status ?? null;
-      } catch (error) {
-        this.error = resolveErrorMessage(error, "Renderer not available.");
-      } finally {
-        this.isLoading = false;
+        return status ?? null;
+      });
+      if (status !== undefined) {
+        this.lastStatus = status;
       }
     },
     async loadScene(projectId: string, sceneId: string) {
-      this.isLoading = true;
-      this.error = null;
-      try {
-        await requestJson(`/api/projects/${projectId}/renderer/loadScene`, {
-          method: "POST",
-          body: JSON.stringify({ sceneId }),
-        });
-      } catch (error) {
-        this.error = resolveErrorMessage(error, "Failed to load scene.");
-        throw error;
-      } finally {
-        this.isLoading = false;
-      }
+      await runStoreRequest(
+        this,
+        "Failed to load scene.",
+        async () => {
+          await requestJson(`/api/projects/${projectId}/renderer/loadScene`, {
+            method: "POST",
+            body: JSON.stringify({ sceneId }),
+          });
+        },
+        { rethrow: true },
+      );
     },
     async playCue(projectId: string, cueId: string) {
-      this.isLoading = true;
-      this.error = null;
-      try {
-        await requestJson(`/api/projects/${projectId}/renderer/playCue`, {
-          method: "POST",
-          body: JSON.stringify({ cueId }),
-        });
-      } catch (error) {
-        this.error = resolveErrorMessage(error, "Failed to play cue.");
-        throw error;
-      } finally {
-        this.isLoading = false;
-      }
+      await runStoreRequest(
+        this,
+        "Failed to play cue.",
+        async () => {
+          await requestJson(`/api/projects/${projectId}/renderer/playCue`, {
+            method: "POST",
+            body: JSON.stringify({ cueId }),
+          });
+        },
+        { rethrow: true },
+      );
     },
     async toggleTestPattern(enabled?: boolean) {
-      this.isLoading = true;
-      this.error = null;
       const newState = enabled ?? !this.testPatternEnabled;
-      try {
-        await requestJson("/api/renderer/testPattern", {
-          method: "POST",
-          body: JSON.stringify({ enabled: newState }),
-        });
-        this.testPatternEnabled = newState;
-      } catch (error) {
-        this.error = resolveErrorMessage(error, "Failed to toggle test pattern.");
-        throw error;
-      } finally {
-        this.isLoading = false;
-      }
+      await runStoreRequest(
+        this,
+        "Failed to toggle test pattern.",
+        async () => {
+          await requestJson("/api/renderer/testPattern", {
+            method: "POST",
+            body: JSON.stringify({ enabled: newState }),
+          });
+          this.testPatternEnabled = newState;
+        },
+        { rethrow: true },
+      );
     },
     async showCrosshair(enabled: boolean, x = 0, y = 0) {
       // Fire-and-forget: don't set loading state or track errors

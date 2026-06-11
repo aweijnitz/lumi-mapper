@@ -4,11 +4,8 @@
 #include <cmath>
 #include <csignal>
 #include <cstdlib>
-#include <iomanip>
 #include <iostream>
 #include <limits>
-#include <map>
-#include <sstream>
 #include <utility>
 #include <vector>
 
@@ -449,38 +446,48 @@ void ofApp::draw() {
 
   // Draw debug info overlay if enabled
   if (showDebugInfo_) {
-    ofDrawBitmapString("Renderer connected to: " + host_ + ":" + std::to_string(serverPort), 20, 20);
-    if (!role.empty()) {
-      ofDrawBitmapString("Role: " + role + " | Version: " + version, 20, 40);
+    const projection::renderer::RendererStatusSnapshot status{
+        host_,
+        serverPort,
+        role,
+        version,
+        sceneId,
+        lastCommand,
+        lastError,
+    };
+    float textY = 20.0f;
+    for (const auto& line : projection::renderer::buildDebugOverlayLines(status)) {
+      ofSetColor(line.isError ? ofColor(255, 0, 0) : ofColor(255, 255, 255));
+      ofDrawBitmapString(line.text, 20, textY);
+      textY += 20.0f;
     }
-    if (!sceneId.empty()) {
-      ofDrawBitmapString("Loaded Scene: " + sceneId, 20, 60);
-    }
-    if (!lastCommand.empty()) {
-      ofDrawBitmapString("Last Command: " + lastCommand, 20, 80);
-    }
-    if (!lastError.empty()) {
-      ofSetColor(255, 0, 0);
-      ofDrawBitmapString("Last Error: " + lastError, 20, 100);
-    }
+    ofSetColor(255, 255, 255);
   }
 
   // Draw calibration grid overlay if enabled
   if (gridMode_ != GridMode::Off) {
-    drawCalibrationGrid();
+    projection::renderer::drawCalibrationGrid(
+        screenW,
+        screenH,
+        projection::renderer::CalibrationOverlayState{
+            gridMode_,
+            monochromeEnabled_,
+            colorTintEnabled_,
+            dramaticModeEnabled_,
+            tintPaletteIndex_,
+        });
   }
 
   // Draw crosshair overlay if enabled (from composer vertex drag)
   // Auto-hide crosshair after timeout to handle cases where disable message is lost
   if (crosshairEnabled_) {
-    const float timeSinceUpdate = ofGetElapsedTimef() - crosshairLastUpdateTime_;
-    if (timeSinceUpdate > kCrosshairTimeoutSeconds) {
+    if (projection::renderer::shouldAutoHideCrosshair(currentTime, crosshairLastUpdateTime_, kCrosshairTimeoutSeconds)) {
       crosshairEnabled_ = false;
       if (verbose_) {
         std::cerr << "[renderer] crosshair auto-hidden after timeout" << std::endl;
       }
     } else {
-      drawCrosshair();
+      projection::renderer::drawCrosshair(screenW, screenH, crosshairX_, crosshairY_);
     }
   }
 }
@@ -530,13 +537,17 @@ void ofApp::processMessage(const projection::core::RendererMessage& message) {
     case RendererMessageType::Hello:
       {
         std::lock_guard<std::mutex> lock(stateMutex_);
-        updateStatusForHello(*message.hello, message.commandId);
+        rendererRole_ = message.hello->role;
+        rendererVersion_ = message.hello->version;
+        lastCommand_ = projection::renderer::formatHelloCommand(message.commandId);
       }
       break;
     case RendererMessageType::LoadScene:
       {
         std::lock_guard<std::mutex> lock(stateMutex_);
-        updateStatusForLoadScene(*message.loadScene, message.commandId);
+        sceneId_ = message.loadScene->sceneId.value;
+        lastCommand_ =
+            projection::renderer::formatLoadSceneCommand(message.commandId, message.loadScene->projectId.value);
       }
       break;
     case RendererMessageType::LoadSceneDefinition:
@@ -550,19 +561,25 @@ void ofApp::processMessage(const projection::core::RendererMessage& message) {
       {
         std::lock_guard<std::mutex> lock(stateMutex_);
         sceneId_ = message.loadSceneDefinition->scene.getId().value;
-        lastCommand_ = "LoadSceneDefinition (#" + message.commandId + ")";
+        lastCommand_ = projection::renderer::formatLoadSceneDefinitionCommand(message.commandId);
       }
       break;
     case RendererMessageType::SetFeedForSurface:
       {
         std::lock_guard<std::mutex> lock(stateMutex_);
-        updateStatusForSetFeed(*message.setFeedForSurface, message.commandId);
+        lastCommand_ = projection::renderer::formatSetFeedForSurfaceCommand(message.commandId,
+                                                                            message.setFeedForSurface->projectId.value,
+                                                                            message.setFeedForSurface->surfaceId.value,
+                                                                            message.setFeedForSurface->feedId.value);
       }
       break;
     case RendererMessageType::PlayCue:
       {
         std::lock_guard<std::mutex> lock(stateMutex_);
-        updateStatusForPlayCue(*message.playCue, message.commandId);
+        lastCommand_ =
+            projection::renderer::formatPlayCueCommand(message.commandId,
+                                                       message.playCue->projectId.value,
+                                                       message.playCue->cueId.value);
       }
       break;
     case RendererMessageType::ShowTestPattern:
@@ -575,7 +592,7 @@ void ofApp::processMessage(const projection::core::RendererMessage& message) {
         }
         {
           std::lock_guard<std::mutex> lock(stateMutex_);
-          lastCommand_ = "ShowTestPattern (#" + message.commandId + ")";
+          lastCommand_ = projection::renderer::formatShowTestPatternCommand(message.commandId);
         }
       }
       break;
@@ -598,46 +615,12 @@ void ofApp::processMessage(const projection::core::RendererMessage& message) {
   }
 }
 
-void ofApp::updateStatusForHello(const projection::core::HelloMessage& hello, const std::string& commandId) {
-  rendererRole_ = hello.role;
-  rendererVersion_ = hello.version;
-  lastCommand_ = "Hello (#" + commandId + ")";
-}
-
-void ofApp::updateStatusForLoadScene(const projection::core::LoadSceneMessage& loadScene,
-                                     const std::string& commandId) {
-  sceneId_ = loadScene.sceneId.value;
-  lastCommand_ = "LoadScene (#" + commandId + ") project " + loadScene.projectId.value;
-}
-
-void ofApp::updateStatusForSetFeed(const projection::core::SetFeedForSurfaceMessage& setFeed,
-                                   const std::string& commandId) {
-  lastCommand_ = "SetFeedForSurface (#" + commandId + ") project " + setFeed.projectId.value + " -> surface " +
-                 setFeed.surfaceId.value + " feed " + setFeed.feedId.value;
-}
-
-void ofApp::updateStatusForPlayCue(const projection::core::PlayCueMessage& playCue, const std::string& commandId) {
-  lastCommand_ =
-      "PlayCue (#" + commandId + ") project " + playCue.projectId.value + " -> cue " + playCue.cueId.value;
-}
-
 void ofApp::keyPressed(int key) {
   if (key == 'g' || key == 'G') {
-    // Cycle through grid modes: Off -> Solid -> Overlay -> Off
-    switch (gridMode_) {
-      case GridMode::Off:
-        gridMode_ = GridMode::Solid;
-        break;
-      case GridMode::Solid:
-        gridMode_ = GridMode::Overlay;
-        break;
-      case GridMode::Overlay:
-        gridMode_ = GridMode::Off;
-        break;
-    }
+    gridMode_ = projection::renderer::cycleGridMode(gridMode_);
     if (verbose_) {
-      const char* modeNames[] = {"off", "solid", "overlay"};
-      std::cerr << "[renderer] calibration grid: " << modeNames[static_cast<int>(gridMode_)] << std::endl;
+      std::cerr << "[renderer] calibration grid: " << projection::renderer::calibrationGridModeName(gridMode_)
+                << std::endl;
     }
   } else if (key == 'm' || key == 'M') {
     monochromeEnabled_ = !monochromeEnabled_;
@@ -657,8 +640,8 @@ void ofApp::keyPressed(int key) {
   } else if (key == 'p' || key == 'P') {
     tintPaletteIndex_ = (tintPaletteIndex_ + 1) % kNumPalettes;
     if (verbose_) {
-      const char* paletteNames[] = {"Mixed Neon", "Cyan/Magenta", "Fire/Ice", "Tropical", "Noir"};
-      std::cerr << "[renderer] switched to palette: " << paletteNames[tintPaletteIndex_] << std::endl;
+      std::cerr << "[renderer] switched to palette: " << projection::renderer::tintPaletteName(tintPaletteIndex_)
+                << std::endl;
     }
   } else if (key == 'v' || key == 'V') {
     verbose_ = !verbose_;
@@ -671,193 +654,7 @@ void ofApp::keyPressed(int key) {
   }
 }
 
-ofColor ofApp::getTintColorForSurface(int surfaceIndex) const {
-  const int paletteIdx = tintPaletteIndex_ % kNumPalettes;
-  const int colorIdx = surfaceIndex % kColorsPerPalette;
-  const TintColor& tint = kTintPalettes[paletteIdx][colorIdx];
-  return ofColor(
-      static_cast<int>(tint.r * 255.0f),
-      static_cast<int>(tint.g * 255.0f),
-      static_cast<int>(tint.b * 255.0f));
-}
-
 // Note: applyDramaticFilter was removed for performance reasons.
 // The dramatic/tint effects are now applied during surface rendering
 // via per-surface tint colors, which is much more GPU-efficient than
 // CPU-based per-pixel processing.
-
-void ofApp::drawCalibrationGrid() {
-  const float screenW = static_cast<float>(ofGetWidth());
-  const float screenH = static_cast<float>(ofGetHeight());
-
-  const bool isOverlay = (gridMode_ == GridMode::Overlay);
-
-  // Theme colors - more subtle in overlay mode to not overpower video
-  const ofColor accentColor(0, 180, 216);      // #00b4d8 - cyan accent
-  const ofColor gridColor = isOverlay ? ofColor(80, 80, 80) : ofColor(58, 58, 58);
-  const ofColor borderColor = isOverlay ? ofColor(0, 180, 216, 180) : ofColor(0, 180, 216);
-  const ofColor centerColor = isOverlay ? ofColor(255, 149, 0, 180) : ofColor(255, 149, 0);
-  const ofColor labelColor(200, 200, 200);     // #c8c8c8 - light text
-
-  // Draw dark background only in Solid mode
-  if (!isOverlay) {
-    ofSetColor(26, 26, 26, 230);  // #1a1a1a with alpha
-    ofDrawRectangle(0, 0, screenW, screenH);
-  }
-
-  // Major grid divisions (8x8 for a nice grid)
-  const int majorDivisionsX = 8;
-  const int majorDivisionsY = 8;
-  const float majorCellW = screenW / static_cast<float>(majorDivisionsX);
-  const float majorCellH = screenH / static_cast<float>(majorDivisionsY);
-
-  // In overlay mode, only draw major grid lines (less clutter over video)
-  // In solid mode, also draw minor subdivisions
-  if (!isOverlay) {
-    // Minor grid divisions (subdivide each major cell into 4)
-    const int minorSubdivisions = 4;
-    const float minorCellW = majorCellW / static_cast<float>(minorSubdivisions);
-    const float minorCellH = majorCellH / static_cast<float>(minorSubdivisions);
-
-    // Draw minor grid lines (subtle)
-    ofSetColor(gridColor, 80);
-    ofSetLineWidth(1.0f);
-    for (float x = 0; x <= screenW; x += minorCellW) {
-      ofDrawLine(x, 0, x, screenH);
-    }
-    for (float y = 0; y <= screenH; y += minorCellH) {
-      ofDrawLine(0, y, screenW, y);
-    }
-  }
-
-  // Draw major grid lines - subtle in overlay mode
-  const int majorAlpha = isOverlay ? 60 : 180;
-  ofSetColor(gridColor, majorAlpha);
-  ofSetLineWidth(isOverlay ? 1.0f : 1.5f);
-  for (float x = 0; x <= screenW; x += majorCellW) {
-    ofDrawLine(x, 0, x, screenH);
-  }
-  for (float y = 0; y <= screenH; y += majorCellH) {
-    ofDrawLine(0, y, screenW, y);
-  }
-
-  // Draw center crosshair
-  const float centerX = screenW / 2.0f;
-  const float centerY = screenH / 2.0f;
-  const float crosshairSize = std::min(screenW, screenH) * 0.15f;
-
-  ofSetColor(centerColor);
-  ofSetLineWidth(2.0f);
-  // Horizontal line
-  ofDrawLine(centerX - crosshairSize, centerY, centerX + crosshairSize, centerY);
-  // Vertical line
-  ofDrawLine(centerX, centerY - crosshairSize, centerX, centerY + crosshairSize);
-  // Center circle
-  ofNoFill();
-  ofSetLineWidth(2.0f);
-  ofDrawCircle(centerX, centerY, 20);
-  ofDrawCircle(centerX, centerY, 40);
-  ofFill();
-
-  // Draw border frame (cyan accent)
-  ofNoFill();
-  ofSetColor(borderColor);
-  ofSetLineWidth(isOverlay ? 2.0f : 4.0f);
-  ofDrawRectangle(2, 2, screenW - 4, screenH - 4);
-
-  // Draw corner markers
-  const float cornerSize = 60.0f;
-  ofSetLineWidth(isOverlay ? 2.0f : 3.0f);
-
-  // Top-left corner
-  ofDrawLine(2, 2, 2 + cornerSize, 2);
-  ofDrawLine(2, 2, 2, 2 + cornerSize);
-
-  // Top-right corner
-  ofDrawLine(screenW - 2, 2, screenW - 2 - cornerSize, 2);
-  ofDrawLine(screenW - 2, 2, screenW - 2, 2 + cornerSize);
-
-  // Bottom-left corner
-  ofDrawLine(2, screenH - 2, 2 + cornerSize, screenH - 2);
-  ofDrawLine(2, screenH - 2, 2, screenH - 2 - cornerSize);
-
-  // Bottom-right corner
-  ofDrawLine(screenW - 2, screenH - 2, screenW - 2 - cornerSize, screenH - 2);
-  ofDrawLine(screenW - 2, screenH - 2, screenW - 2, screenH - 2 - cornerSize);
-
-  ofFill();
-
-  // Draw resolution label
-  ofSetColor(labelColor);
-  const std::string resLabel = std::to_string(static_cast<int>(screenW)) + " x " +
-                               std::to_string(static_cast<int>(screenH));
-  ofDrawBitmapString("CALIBRATION GRID", 20, screenH - 100);
-  ofDrawBitmapString("Resolution: " + resLabel, 20, screenH - 80);
-  ofDrawBitmapString("G: Grid | M: Mono | T: Tint | D: Dramatic | P: Palette | I: Info | V: Verbose", 20, screenH - 60);
-
-  // Show current mode status
-  const char* paletteNames[] = {"Mixed Neon", "Cyan/Magenta", "Fire/Ice", "Tropical", "Noir"};
-  std::string status = "Mono: " + std::string(monochromeEnabled_ ? "ON" : "OFF") +
-                       " | Tint: " + std::string(colorTintEnabled_ ? "ON" : "OFF") +
-                       " | Dramatic: " + std::string(dramaticModeEnabled_ ? "ON" : "OFF");
-  ofDrawBitmapString(status, 20, screenH - 40);
-  ofDrawBitmapString("Palette: " + std::string(paletteNames[tintPaletteIndex_ % kNumPalettes]), 20, screenH - 20);
-
-  // Draw "LUMI MAPPER" title at top
-  ofSetColor(accentColor);
-  ofDrawBitmapString("LUMI MAPPER", centerX - 40, 30);
-}
-
-void ofApp::drawCrosshair() {
-  const float screenW = static_cast<float>(ofGetWidth());
-  const float screenH = static_cast<float>(ofGetHeight());
-
-  // Convert normalized coordinates (-1 to 1) to screen coordinates
-  const float screenX = (crosshairX_ * 0.5f + 0.5f) * screenW;
-  const float screenY = (crosshairY_ * 0.5f + 0.5f) * screenH;
-
-  // Crosshair colors - high visibility
-  const ofColor crosshairColor(0, 180, 216);     // Cyan accent
-  const ofColor coordColor(255, 255, 255, 200);  // White text
-
-  // Draw full-screen crosshair lines (dashed appearance via segments)
-  ofSetColor(crosshairColor, 180);
-  ofSetLineWidth(1.5f);
-
-  // Draw horizontal line
-  ofDrawLine(0, screenY, screenW, screenY);
-
-  // Draw vertical line
-  ofDrawLine(screenX, 0, screenX, screenH);
-
-  // Draw center indicator - concentric circles
-  ofNoFill();
-  ofSetColor(crosshairColor);
-  ofSetLineWidth(2.0f);
-  ofDrawCircle(screenX, screenY, 8);
-  ofDrawCircle(screenX, screenY, 20);
-  ofFill();
-
-  // Draw small filled center dot
-  ofSetColor(crosshairColor);
-  ofDrawCircle(screenX, screenY, 3);
-
-  // Draw coordinate label
-  ofSetColor(coordColor);
-  std::ostringstream oss;
-  oss << std::fixed << std::setprecision(3) << "(" << crosshairX_ << ", " << crosshairY_ << ")";
-
-  // Position label to avoid edge clipping
-  float labelX = screenX + 25;
-  float labelY = screenY - 15;
-
-  // Adjust if too close to edges
-  if (labelX > screenW - 100) {
-    labelX = screenX - 100;
-  }
-  if (labelY < 20) {
-    labelY = screenY + 25;
-  }
-
-  ofDrawBitmapString(oss.str(), labelX, labelY);
-}

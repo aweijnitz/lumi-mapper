@@ -9,6 +9,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <filesystem>
+#include <functional>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 using projection::core::Cue;
@@ -27,6 +30,20 @@ using projection::server::repo::SceneRepository;
 
 namespace {
 std::filesystem::path tempDb(const std::string& name) { return std::filesystem::temp_directory_path() / name; }
+
+void requireParseFailure(const std::function<void()>& action, const std::string& expectedProjectId,
+                         const std::string& expectedField) {
+    bool didThrow = false;
+    try {
+        action();
+    } catch (const std::runtime_error& ex) {
+        didThrow = true;
+        const std::string message = ex.what();
+        REQUIRE(message.find(expectedProjectId) != std::string::npos);
+        REQUIRE(message.find(expectedField) != std::string::npos);
+    }
+    REQUIRE(didThrow);
+}
 }  // namespace
 
 TEST_CASE("ProjectRepository persists and retrieves ordered cues", "[repo][project]") {
@@ -115,3 +132,42 @@ TEST_CASE("ProjectRepository tolerates empty settings_json values", "[repo][proj
     REQUIRE(fetched->getSettings().globalConfig.empty());
 }
 
+TEST_CASE("ProjectRepository surfaces malformed settings_json content", "[repo][project][error]") {
+    SqliteConnection connection;
+    auto dbPath = tempDb("project_repo_bad_settings.sqlite");
+    std::filesystem::remove(dbPath);
+    connection.open(dbPath.string());
+    SchemaMigrations::applyMigrations(connection);
+
+    connection.execute(
+        "INSERT INTO projects(id, name, description, created_at, updated_at, asset_ids_json, scene_ids_json, "
+        "feed_ids_json, cue_order_json, settings_json) VALUES('proj-bad-settings', 'Broken', 'Bad settings', "
+        "'2026-02-02T10:00:00Z', '2026-02-02T10:00:00Z', '[]', '[]', '[]', '[]', '{\"controllers\":');");
+
+    ProjectRepository projectRepo(connection);
+
+    requireParseFailure([&]() { static_cast<void>(projectRepo.listProjects()); }, "proj-bad-settings",
+                        "settings_json");
+    requireParseFailure([&]() { static_cast<void>(projectRepo.findProjectById(makeProjectId("proj-bad-settings"))); },
+                        "proj-bad-settings", "settings_json");
+}
+
+TEST_CASE("ProjectRepository rejects corrupt project id arrays", "[repo][project][error]") {
+    SqliteConnection connection;
+    auto dbPath = tempDb("project_repo_bad_arrays.sqlite");
+    std::filesystem::remove(dbPath);
+    connection.open(dbPath.string());
+    SchemaMigrations::applyMigrations(connection);
+
+    connection.execute(
+        "INSERT INTO projects(id, name, description, created_at, updated_at, asset_ids_json, scene_ids_json, "
+        "feed_ids_json, cue_order_json, settings_json) VALUES('proj-bad-array', 'Broken', 'Bad ids', "
+        "'2026-02-02T10:00:00Z', '2026-02-02T10:00:00Z', '[]', '[]', '[]', '[\"cue-a\", 7]', '{}');");
+
+    ProjectRepository projectRepo(connection);
+
+    requireParseFailure([&]() { static_cast<void>(projectRepo.listProjects()); }, "proj-bad-array",
+                        "cue_order_json");
+    requireParseFailure([&]() { static_cast<void>(projectRepo.findProjectById(makeProjectId("proj-bad-array"))); },
+                        "proj-bad-array", "cue_order_json");
+}

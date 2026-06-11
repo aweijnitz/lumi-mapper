@@ -25,11 +25,12 @@ flowchart LR
 
 ## High-Level Data & Control Flows
 1. **Client → Server (HTTP+JSON)**: Clients call the HTTP API to manage domain objects and drive the renderer.
-   - Assets: `POST /assets` uploads assets; `GET /assets` lists assets.
-   - Feeds: `POST /feeds` creates a feed (references an asset); `GET /feeds` lists feeds.
-   - Scenes: `POST /scenes` creates a scene (validated against existing feeds); `GET /scenes` lists scenes; `GET /scenes/{id}` fetches one.
-   - Projects: `POST /projects` creates a project (ordered `cueOrder` plus settings), `GET /projects` lists projects, `GET /projects/{id}` fetches one, `PUT /projects/{id}` updates, `DELETE /projects/{id}` removes; cues used by projects cannot be deleted.
-   - Renderer control: `POST /renderer/ping` issues a `Hello` control message round-trip; `POST /renderer/loadScene` asks the renderer to load a stored scene definition.
+   - Projects: `POST /projects` creates a project (ordered `cueOrder` plus settings), `GET /projects` lists projects, `GET /projects/{id}` fetches one, `PUT /projects/{id}` updates, `DELETE /projects/{id}` removes.
+   - Assets: `GET /assets` lists all assets, `POST /assets` uploads an asset, `GET /projects/{projectId}/assets` lists project-associated assets, `POST /projects/{projectId}/assets` uploads and associates, `POST /projects/{projectId}/assets/{assetId}` associates an existing asset, `DELETE /projects/{projectId}/assets/{assetId}` removes a project association, and `DELETE /assets/{assetId}` removes the asset record plus file.
+   - Feeds: `GET /projects/{projectId}/feeds`, `POST /projects/{projectId}/feeds`, `PUT /projects/{projectId}/feeds/{feedId}`, `DELETE /projects/{projectId}/feeds/{feedId}`.
+   - Scenes: `GET /projects/{projectId}/scenes`, `GET /projects/{projectId}/scenes/{sceneId}`, `POST /projects/{projectId}/scenes`, `PUT /projects/{projectId}/scenes/{sceneId}`, `DELETE /projects/{projectId}/scenes/{sceneId}`.
+   - Cues: `GET /projects/{projectId}/cues`, `POST /projects/{projectId}/cues`, `PUT /projects/{projectId}/cues/{cueId}`, `DELETE /projects/{projectId}/cues/{cueId}`.
+   - Renderer control: `GET` or `POST /renderer/ping` reports connected renderers; `POST /projects/{projectId}/renderer/loadScene` and `POST /projects/{projectId}/renderer/playCue` drive project-scoped playback; `POST /renderer/testPattern` and `POST /renderer/crosshair` control overlays.
 2. **Server → SQLite**: The Server initializes a `db::SqliteConnection`, applies migrations, and persists assets/feeds/scenes through repositories before serving HTTP (`ServerApp::run`).
 3. **Server → Renderer (TCP Control Protocol)**: `RendererClient` connects at startup, then sends control messages such as `LoadSceneDefinition` (scene + feeds + assets) over TCP (default renderer port 5050).
 4. **Renderer → Projector/Display**: The Renderer draws the active scene using openFrameworks, applying MIDI/audio-driven modulation where configured.
@@ -110,7 +111,7 @@ flowchart TB
 ```
 
 - **Main/Configuration**: Entry point parses CLI flags (DB path, HTTP port, renderer host/port) and wires dependencies.
-- **HTTP Layer**: Thin cpp-httplib wrapper (`http::HttpServer`) exposes project-scoped routes for feeds/scenes/cues under `/api/projects/{projectId}/*` plus renderer control; requests translate into domain operations.
+- **HTTP Layer**: Thin cpp-httplib wrapper (`http::HttpServer`) exposes project-scoped routes for assets/feeds/scenes/cues under `/projects/{projectId}/*` and mirrors them under `/api/...`; renderer control is split between project-scoped playback routes and global renderer utility routes.
 - **Repositories & DB Layer**: `db::SqliteConnection` plus schema migrations back repositories that CRUD assets/feeds/scenes/cues while enforcing validation against asset/feed IDs within a project.
 - **Renderer Client Adapter**: `RendererClient` connects during startup and maps HTTP handler intents (ping, load scene) to protocol messages before HTTP serving begins.
 - **Domain Integration**: Uses the core library’s types and JSON helpers to validate payloads and serialize messages consistently across layers.

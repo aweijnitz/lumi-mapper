@@ -1,11 +1,13 @@
 #include "db/SchemaMigrations.h"
 #include "db/SqliteConnection.h"
 #include "projection/core/Asset.h"
+#include "projection/core/Cue.h"
 #include "projection/core/Feed.h"
 #include "projection/core/Project.h"
 #include "projection/core/Scene.h"
 #include "projection/core/Surface.h"
 #include "repo/AssetRepository.h"
+#include "repo/CueRepository.h"
 #include "repo/FeedRepository.h"
 #include "repo/ProjectRepository.h"
 #include "repo/SceneRepository.h"
@@ -21,17 +23,23 @@
 using projection::core::Asset;
 using projection::core::AssetId;
 using projection::core::AssetType;
+using projection::core::AssetVariant;
+using projection::core::Cue;
 using projection::core::Feed;
 using projection::core::Project;
 using projection::core::ProjectId;
 using projection::core::ProjectSettings;
 using projection::core::Scene;
+using projection::core::makeAssetId;
+using projection::core::makeCueId;
 using projection::core::makeProjectId;
 using projection::core::makeFeedId;
 using projection::core::makeSceneId;
+using projection::core::makeSurfaceId;
 using projection::server::db::SchemaMigrations;
 using projection::server::db::SqliteConnection;
 using projection::server::repo::AssetRepository;
+using projection::server::repo::CueRepository;
 using projection::server::repo::FeedRepository;
 using projection::server::repo::ProjectRepository;
 using projection::server::repo::SceneRepository;
@@ -142,6 +150,95 @@ TEST_CASE("FeedRepository accepts string ids", "[repo][feed]") {
     REQUIRE(found.has_value());
 }
 
+TEST_CASE("AssetRepository persists variants and project associations", "[repo][asset]") {
+    SqliteConnection connection;
+    setupTestDb(connection, "asset_repo.sqlite");
+
+    AssetRepository repo(connection);
+    ProjectRepository projectRepo(connection);
+    auto project = createProject(projectRepo, makeProjectId("proj-1"));
+
+    Asset asset(makeAssetId("asset-1"), "Clip", AssetType::VideoFile, "/media/video.mp4",
+                {AssetVariant{"/media/video-proxy.mp4", "proxy"}, AssetVariant{"/media/video-loop.mp4", "loop"}});
+    auto created = repo.createAsset(asset);
+
+    repo.addAssetToProject(project.getId(), created.getId());
+    repo.addAssetToProject(project.getId(), created.getId());
+
+    auto assetIds = repo.listAssetIdsForProject(project.getId());
+    REQUIRE(assetIds.size() == 1);
+    REQUIRE(assetIds.front() == created.getId());
+
+    auto projectAssets = repo.listAssetsForProject(project.getId());
+    REQUIRE(projectAssets.size() == 1);
+    REQUIRE(projectAssets.front().getVariants() == asset.getVariants());
+
+    created.setName("Clip Updated");
+    created.setPath("/media/video-updated.mp4");
+    created.setVariants({AssetVariant{"/media/video-hd.mp4", "hd"}});
+    repo.updateAsset(created);
+
+    auto fetched = repo.findAssetById(created.getId());
+    REQUIRE(fetched.has_value());
+    REQUIRE(fetched->getName() == "Clip Updated");
+    REQUIRE(fetched->getPath() == "/media/video-updated.mp4");
+    REQUIRE(fetched->getVariants() == created.getVariants());
+
+    repo.removeAssetFromProject(project.getId(), created.getId());
+    REQUIRE(repo.listAssetIdsForProject(project.getId()).empty());
+    REQUIRE(repo.listAssetsForProject(project.getId()).empty());
+}
+
+TEST_CASE("CueRepository persists cue overrides across read paths", "[repo][cue]") {
+    SqliteConnection connection;
+    setupTestDb(connection, "cue_repo.sqlite");
+
+    ProjectRepository projectRepo(connection);
+    SceneRepository sceneRepo(connection);
+    CueRepository cueRepo(connection);
+    auto project = createProject(projectRepo, makeProjectId("proj-1"));
+
+    auto sceneA = sceneRepo.createScene(Scene(project.getId(), makeSceneId("scene-a"), "Scene A", "desc", {}));
+    auto sceneB = sceneRepo.createScene(Scene(project.getId(), makeSceneId("scene-b"), "Scene B", "desc", {}));
+
+    Cue cue(project.getId(), makeCueId("cue-1"), "Intro", sceneA.getId());
+    cue.getSurfaceOpacities().emplace(makeSurfaceId("surface-1"), 0.25F);
+    cue.getSurfaceOpacities().emplace(makeSurfaceId("surface-2"), 0.75F);
+    cue.getSurfaceBrightnesses().emplace(makeSurfaceId("surface-1"), 0.5F);
+    cue.getSurfaceBrightnesses().emplace(makeSurfaceId("surface-2"), 0.9F);
+    cueRepo.createCue(cue);
+
+    auto listed = cueRepo.listCues(project.getId());
+    REQUIRE(listed.size() == 1);
+    REQUIRE(listed.front().getSurfaceOpacities() == cue.getSurfaceOpacities());
+    REQUIRE(listed.front().getSurfaceBrightnesses() == cue.getSurfaceBrightnesses());
+
+    auto fetched = cueRepo.findCueById(project.getId(), cue.getId());
+    REQUIRE(fetched.has_value());
+    REQUIRE(fetched->getName() == "Intro");
+    REQUIRE(fetched->getSceneId() == sceneA.getId());
+    REQUIRE(fetched->getSurfaceOpacities() == cue.getSurfaceOpacities());
+    REQUIRE(fetched->getSurfaceBrightnesses() == cue.getSurfaceBrightnesses());
+
+    cue.setName("Updated Intro");
+    cue.setSceneId(sceneB.getId());
+    cue.getSurfaceOpacities()[makeSurfaceId("surface-1")] = 0.1F;
+    cue.getSurfaceBrightnesses().erase(makeSurfaceId("surface-2"));
+    cue.getSurfaceBrightnesses()[makeSurfaceId("surface-3")] = 1.0F;
+    cueRepo.updateCue(cue);
+
+    auto updated = cueRepo.findCueById(project.getId(), cue.getId());
+    REQUIRE(updated.has_value());
+    REQUIRE(updated->getName() == "Updated Intro");
+    REQUIRE(updated->getSceneId() == sceneB.getId());
+    REQUIRE(updated->getSurfaceOpacities() == cue.getSurfaceOpacities());
+    REQUIRE(updated->getSurfaceBrightnesses() == cue.getSurfaceBrightnesses());
+
+    cueRepo.deleteCue(project.getId(), cue.getId());
+    REQUIRE(cueRepo.listCues(project.getId()).empty());
+    REQUIRE(!cueRepo.findCueById(project.getId(), cue.getId()).has_value());
+}
+
 TEST_CASE("SceneRepository prevents duplicate numeric ids", "[repo][scene][error]") {
     SqliteConnection connection;
     setupTestDb(connection, "scene_repo_error.sqlite");
@@ -155,4 +252,3 @@ TEST_CASE("SceneRepository prevents duplicate numeric ids", "[repo][scene][error
     repo.createScene(sceneA);
     REQUIRE(expectRuntimeError([&]() { repo.createScene(sceneB); }));
 }
-

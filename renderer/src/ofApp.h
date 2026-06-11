@@ -17,6 +17,8 @@
 #include "RenderState.h"
 #include "net/RendererClient.h"
 #include "util/InteractionUtils.h"
+#include "util/RendererOverlayUtils.h"
+#include "util/RendererStatusUtils.h"
 
 class ofApp : public ofBaseApp,
 #if PROJECTION_HAS_OFX_MIDI
@@ -44,16 +46,12 @@ class ofApp : public ofBaseApp,
   void audioIn(ofSoundBuffer& input) override;
 #endif
 
-  void handle(const projection::core::RendererMessage& message) override;
+ void handle(const projection::core::RendererMessage& message) override;
 
  private:
+  using GridMode = projection::renderer::CalibrationGridMode;
+
   void checkWindowDimensions();
-  void updateStatusForHello(const projection::core::HelloMessage& hello, const std::string& commandId);
-  void updateStatusForLoadScene(const projection::core::LoadSceneMessage& loadScene,
-                                const std::string& commandId);
-  void updateStatusForSetFeed(const projection::core::SetFeedForSurfaceMessage& setFeed,
-                              const std::string& commandId);
-  void updateStatusForPlayCue(const projection::core::PlayCueMessage& playCue, const std::string& commandId);
   void processMessage(const projection::core::RendererMessage& message);
 
   projection::renderer::RendererClient client_;
@@ -171,13 +169,9 @@ class ofApp : public ofBaseApp,
        {0.6f, 0.6f, 0.65f},     // Pewter (brightened)
        {1.0f, 0.5f, 0.0f}}      // Accent orange
   };
-  ofColor getTintColorForSurface(int surfaceIndex) const;
 
-  // Calibration grid overlay modes: 0=off, 1=solid (opaque), 2=overlay (transparent)
-  enum class GridMode { Off = 0, Solid = 1, Overlay = 2 };
   GridMode gridMode_{GridMode::Off};
   bool showDebugInfo_{true};  // Toggle debug text overlay
-  void drawCalibrationGrid();
 
   // Crosshair overlay for vertex alignment (sent from composer during drag)
   bool crosshairEnabled_{false};
@@ -185,7 +179,6 @@ class ofApp : public ofBaseApp,
   float crosshairY_{0.0f};  // Normalized -1 to 1
   float crosshairLastUpdateTime_{0.0f};  // Time of last crosshair update
   static constexpr float kCrosshairTimeoutSeconds = 2.0f;  // Auto-hide after 2 seconds
-  void drawCrosshair();
 
   void keyPressed(int key) override;
 };

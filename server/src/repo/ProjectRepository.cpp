@@ -3,17 +3,26 @@
 #include <nlohmann/json.hpp>
 #include <sqlite3.h>
 
-#include <iostream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "projection/core/Serialization.h"
 
 namespace projection::server::repo {
 
 namespace {
+std::string readText(const unsigned char* text, const std::string& fallback = "") {
+    return text ? reinterpret_cast<const char*>(text) : fallback;
+}
+
+std::runtime_error makeProjectParseError(const std::string& projectId, const std::string& field,
+                                         const std::string& detail) {
+    return std::runtime_error("Failed to parse " + field + " for project '" + projectId + "': " + detail);
+}
+
 core::ProjectSettings parseSettingsJson(const unsigned char* settingsText, const std::string& projectId) {
-    std::string settings = settingsText ? reinterpret_cast<const char*>(settingsText) : "";
+    std::string settings = readText(settingsText);
     if (settings.empty()) {
         return {};
     }
@@ -21,28 +30,35 @@ core::ProjectSettings parseSettingsJson(const unsigned char* settingsText, const
         auto settingsJson = nlohmann::json::parse(settings);
         return settingsJson.get<core::ProjectSettings>();
     } catch (const std::exception& ex) {
-        std::cerr << "[repo] Failed to parse settings_json for project '" << projectId << "': " << ex.what()
-                  << std::endl;
-        return {};
+        throw makeProjectParseError(projectId, "settings_json", ex.what());
     }
 }
 
-std::vector<std::string> parseStringArray(const unsigned char* jsonText) {
-    std::string raw = jsonText ? reinterpret_cast<const char*>(jsonText) : "[]";
+std::vector<std::string> parseStringArray(const unsigned char* jsonText, const std::string& field,
+                                          const std::string& projectId) {
+    std::string raw = readText(jsonText, "[]");
     if (raw.empty()) {
         raw = "[]";
     }
-    auto parsed = nlohmann::json::parse(raw);
-    if (!parsed.is_array()) {
-        return {};
-    }
-    std::vector<std::string> values;
-    for (const auto& entry : parsed) {
-        if (entry.is_string()) {
+
+    try {
+        auto parsed = nlohmann::json::parse(raw);
+        if (!parsed.is_array()) {
+            throw std::runtime_error("value must be a JSON array");
+        }
+
+        std::vector<std::string> values;
+        values.reserve(parsed.size());
+        for (const auto& entry : parsed) {
+            if (!entry.is_string()) {
+                throw std::runtime_error("array entries must be strings");
+            }
             values.push_back(entry.get<std::string>());
         }
+        return values;
+    } catch (const std::exception& ex) {
+        throw makeProjectParseError(projectId, field, ex.what());
     }
-    return values;
 }
 
 nlohmann::json toStringArray(const std::vector<std::string>& values) {
@@ -51,6 +67,40 @@ nlohmann::json toStringArray(const std::vector<std::string>& values) {
         arr.push_back(value);
     }
     return arr;
+}
+
+core::Project readProject(sqlite3_stmt* stmt) {
+    const std::string id = readText(sqlite3_column_text(stmt, 0));
+    const std::string name = readText(sqlite3_column_text(stmt, 1));
+    const std::string description = readText(sqlite3_column_text(stmt, 2));
+    const std::string createdAt = readText(sqlite3_column_text(stmt, 3));
+    const std::string updatedAt = readText(sqlite3_column_text(stmt, 4));
+
+    core::ProjectSettings settings = parseSettingsJson(sqlite3_column_text(stmt, 9), id);
+
+    auto assetIdsRaw = parseStringArray(sqlite3_column_text(stmt, 5), "asset_ids_json", id);
+    auto sceneIdsRaw = parseStringArray(sqlite3_column_text(stmt, 6), "scene_ids_json", id);
+    auto feedIdsRaw = parseStringArray(sqlite3_column_text(stmt, 7), "feed_ids_json", id);
+    auto cueOrderRaw = parseStringArray(sqlite3_column_text(stmt, 8), "cue_order_json", id);
+
+    std::vector<core::AssetId> assetIds;
+    assetIds.reserve(assetIdsRaw.size());
+    for (const auto& value : assetIdsRaw) assetIds.emplace_back(value);
+
+    std::vector<core::SceneId> sceneIds;
+    sceneIds.reserve(sceneIdsRaw.size());
+    for (const auto& value : sceneIdsRaw) sceneIds.emplace_back(value);
+
+    std::vector<core::FeedId> feedIds;
+    feedIds.reserve(feedIdsRaw.size());
+    for (const auto& value : feedIdsRaw) feedIds.emplace_back(value);
+
+    std::vector<core::CueId> cueOrder;
+    cueOrder.reserve(cueOrderRaw.size());
+    for (const auto& value : cueOrderRaw) cueOrder.emplace_back(value);
+
+    return core::Project(core::ProjectId{id}, name, description, createdAt, updatedAt, assetIds, sceneIds, feedIds,
+                         cueOrder, settings);
 }
 }
 
@@ -132,41 +182,7 @@ std::vector<core::Project> ProjectRepository::listProjects() {
 
     std::vector<core::Project> projects;
     while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
-        const unsigned char* idText = sqlite3_column_text(stmt, 0);
-        const unsigned char* nameText = sqlite3_column_text(stmt, 1);
-        const unsigned char* descText = sqlite3_column_text(stmt, 2);
-        const unsigned char* createdText = sqlite3_column_text(stmt, 3);
-        const unsigned char* updatedText = sqlite3_column_text(stmt, 4);
-        const unsigned char* assetIdsText = sqlite3_column_text(stmt, 5);
-        const unsigned char* sceneIdsText = sqlite3_column_text(stmt, 6);
-        const unsigned char* feedIdsText = sqlite3_column_text(stmt, 7);
-        const unsigned char* cueOrderText = sqlite3_column_text(stmt, 8);
-        const unsigned char* settingsText = sqlite3_column_text(stmt, 9);
-
-        std::string id = idText ? reinterpret_cast<const char*>(idText) : "";
-        std::string name = nameText ? reinterpret_cast<const char*>(nameText) : "";
-        std::string description = descText ? reinterpret_cast<const char*>(descText) : "";
-        std::string createdAt = createdText ? reinterpret_cast<const char*>(createdText) : "";
-        std::string updatedAt = updatedText ? reinterpret_cast<const char*>(updatedText) : "";
-
-        core::ProjectSettings settings = parseSettingsJson(settingsText, id);
-
-        auto assetIdsRaw = parseStringArray(assetIdsText);
-        auto sceneIdsRaw = parseStringArray(sceneIdsText);
-        auto feedIdsRaw = parseStringArray(feedIdsText);
-        auto cueOrderRaw = parseStringArray(cueOrderText);
-
-        std::vector<core::AssetId> assetIds;
-        for (const auto& value : assetIdsRaw) assetIds.emplace_back(value);
-        std::vector<core::SceneId> sceneIds;
-        for (const auto& value : sceneIdsRaw) sceneIds.emplace_back(value);
-        std::vector<core::FeedId> feedIds;
-        for (const auto& value : feedIdsRaw) feedIds.emplace_back(value);
-        std::vector<core::CueId> cueOrder;
-        for (const auto& value : cueOrderRaw) cueOrder.emplace_back(value);
-
-        projects.emplace_back(core::Project(core::ProjectId{id}, name, description, createdAt, updatedAt, assetIds,
-                                            sceneIds, feedIds, cueOrder, settings));
+        projects.emplace_back(readProject(stmt));
     }
     if (rc != SQLITE_DONE) {
         sqlite3_finalize(stmt);
@@ -199,38 +215,9 @@ std::optional<core::Project> ProjectRepository::findProjectById(const core::Proj
     }
     rc = sqlite3_step(stmt);
     if (rc == SQLITE_ROW) {
-        const unsigned char* nameText = sqlite3_column_text(stmt, 1);
-        const unsigned char* descText = sqlite3_column_text(stmt, 2);
-        const unsigned char* createdText = sqlite3_column_text(stmt, 3);
-        const unsigned char* updatedText = sqlite3_column_text(stmt, 4);
-        const unsigned char* assetIdsText = sqlite3_column_text(stmt, 5);
-        const unsigned char* sceneIdsText = sqlite3_column_text(stmt, 6);
-        const unsigned char* feedIdsText = sqlite3_column_text(stmt, 7);
-        const unsigned char* cueOrderText = sqlite3_column_text(stmt, 8);
-        const unsigned char* settingsText = sqlite3_column_text(stmt, 9);
-
-        std::string name = nameText ? reinterpret_cast<const char*>(nameText) : "";
-        std::string description = descText ? reinterpret_cast<const char*>(descText) : "";
-        std::string createdAt = createdText ? reinterpret_cast<const char*>(createdText) : "";
-        std::string updatedAt = updatedText ? reinterpret_cast<const char*>(updatedText) : "";
-        auto assetIdsRaw = parseStringArray(assetIdsText);
-        auto sceneIdsRaw = parseStringArray(sceneIdsText);
-        auto feedIdsRaw = parseStringArray(feedIdsText);
-        auto cueOrderRaw = parseStringArray(cueOrderText);
-        core::ProjectSettings settings = parseSettingsJson(settingsText, projectId.value);
+        auto project = readProject(stmt);
         sqlite3_finalize(stmt);
-
-        std::vector<core::AssetId> assetIds;
-        for (const auto& value : assetIdsRaw) assetIds.emplace_back(value);
-        std::vector<core::SceneId> sceneIds;
-        for (const auto& value : sceneIdsRaw) sceneIds.emplace_back(value);
-        std::vector<core::FeedId> feedIds;
-        for (const auto& value : feedIdsRaw) feedIds.emplace_back(value);
-        std::vector<core::CueId> cueOrder;
-        for (const auto& value : cueOrderRaw) cueOrder.emplace_back(value);
-
-        return core::Project(projectId, name, description, createdAt, updatedAt, assetIds, sceneIds, feedIds, cueOrder,
-                             settings);
+        return project;
     }
     sqlite3_finalize(stmt);
     return std::nullopt;

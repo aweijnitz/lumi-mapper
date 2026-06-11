@@ -1,6 +1,14 @@
 import { defineStore } from "pinia";
 import type { Scene } from "../types/scene";
-import { requestJson, resolveErrorMessage } from "../composables/useApiClient";
+import { requestJson } from "../composables/useApiClient";
+import {
+  appendEntity,
+  clearActiveEntity,
+  removeEntity,
+  replaceActiveEntity,
+  replaceEntity,
+  runStoreRequest,
+} from "../composables/useStoreCrud";
 
 export const useSceneStore = defineStore("scenes", {
   state: () => ({
@@ -12,17 +20,14 @@ export const useSceneStore = defineStore("scenes", {
   }),
   actions: {
     async fetchScenes(projectId: string) {
-      this.isLoading = true;
-      this.error = null;
-      try {
+      const scenes = await runStoreRequest(this, "Failed to load scenes.", async () => {
         const scenes = await requestJson<Scene[]>(`/api/projects/${projectId}/scenes`, {
           method: "GET",
         });
-        this.scenes = scenes ?? [];
-      } catch (error) {
-        this.error = resolveErrorMessage(error, "Failed to load scenes.");
-      } finally {
-        this.isLoading = false;
+        return scenes ?? [];
+      });
+      if (scenes !== undefined) {
+        this.scenes = scenes;
       }
     },
     setActiveScene(scene: Scene | null) {
@@ -33,66 +38,59 @@ export const useSceneStore = defineStore("scenes", {
       this.activeSurfaceId = surfaceId;
     },
     async createScene(payload: Scene) {
-      this.isLoading = true;
-      this.error = null;
-      try {
-        const created = await requestJson<Scene>(`/api/projects/${payload.projectId}/scenes`, {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
-        const next = created ?? payload;
-        this.scenes = [...this.scenes, next];
-        this.activeScene = next;
-        return next;
-      } catch (error) {
-        this.error = resolveErrorMessage(error, "Failed to create scene.");
-        throw error;
-      } finally {
-        this.isLoading = false;
-      }
+      return runStoreRequest(
+        this,
+        "Failed to create scene.",
+        async () => {
+          const created = await requestJson<Scene>(`/api/projects/${payload.projectId}/scenes`, {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
+          const next = created ?? payload;
+          this.scenes = appendEntity(this.scenes, next);
+          this.activeScene = next;
+          return next;
+        },
+        { rethrow: true },
+      );
     },
     async updateScene(payload: Scene) {
-      this.isLoading = true;
-      this.error = null;
-      try {
-        const updated = await requestJson<Scene>(
-          `/api/projects/${payload.projectId}/scenes/${payload.id}`,
-          {
-            method: "PUT",
-            body: JSON.stringify(payload),
-          },
-        );
-        const next = updated ?? payload;
-        this.scenes = this.scenes.map((scene) => (scene.id === next.id ? next : scene));
-        if (this.activeScene?.id === next.id) {
-          this.activeScene = next;
-        }
-        return next;
-      } catch (error) {
-        this.error = resolveErrorMessage(error, "Failed to update scene.");
-        throw error;
-      } finally {
-        this.isLoading = false;
-      }
+      return runStoreRequest(
+        this,
+        "Failed to update scene.",
+        async () => {
+          const updated = await requestJson<Scene>(
+            `/api/projects/${payload.projectId}/scenes/${payload.id}`,
+            {
+              method: "PUT",
+              body: JSON.stringify(payload),
+            },
+          );
+          const next = updated ?? payload;
+          this.scenes = replaceEntity(this.scenes, next);
+          this.activeScene = replaceActiveEntity(this.activeScene, next);
+          return next;
+        },
+        { rethrow: true },
+      );
     },
     async deleteScene(projectId: string, sceneId: string) {
-      this.isLoading = true;
-      this.error = null;
-      try {
-        await requestJson(`/api/projects/${projectId}/scenes/${sceneId}`, {
-          method: "DELETE",
-        });
-        this.scenes = this.scenes.filter((scene) => scene.id !== sceneId);
-        if (this.activeScene?.id === sceneId) {
-          this.activeScene = null;
-          this.activeSurfaceId = null;
-        }
-      } catch (error) {
-        this.error = resolveErrorMessage(error, "Failed to delete scene.");
-        throw error;
-      } finally {
-        this.isLoading = false;
-      }
+      await runStoreRequest(
+        this,
+        "Failed to delete scene.",
+        async () => {
+          await requestJson(`/api/projects/${projectId}/scenes/${sceneId}`, {
+            method: "DELETE",
+          });
+          const nextActiveScene = clearActiveEntity(this.activeScene, sceneId);
+          this.scenes = removeEntity(this.scenes, sceneId);
+          this.activeScene = nextActiveScene;
+          if (!nextActiveScene) {
+            this.activeSurfaceId = null;
+          }
+        },
+        { rethrow: true },
+      );
     },
   },
 });
