@@ -9,6 +9,8 @@ cmake_install.cmake
 Makefile
 *.cmake
 
+data/assets/vintertrafik-01.mp4
+
 clients/composer/playwright-report/
 
 # Created by https://www.toptal.com/developers/gitignore/api/c,c++,cmake,emacs,vim,intellij+all,visualstudiocode
